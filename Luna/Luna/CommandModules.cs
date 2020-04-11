@@ -21,9 +21,9 @@ namespace Luna
         {
             var userInfo = user ?? Context.Client.CurrentUser;
 
-            if (CommandHandler._instance.MarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
+            if (CommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(playerData.wordChain.GenerateSequence(r, r.Next(10, 80), true));
+                await ReplyAsync(userData.wordChain.GenerateSequence(r, r.Next(10, 80), true));
             }
             else
             {
@@ -40,9 +40,9 @@ namespace Luna
         {
             var userInfo = user ?? Context.Client.CurrentUser;
 
-            if (CommandHandler._instance.MarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
+            if (CommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(playerData.nGramChain.GenerateSequence(r, r.Next(10, 80), false));
+                await ReplyAsync(userData.nGramChain.GenerateSequence(r, r.Next(10, 80), false));
             }
             else
             {
@@ -50,22 +50,19 @@ namespace Luna
             }
         }
 
-        [Command("clearMimic")]
+        [Command("clearMe")]
         [Summary("Bye bye data")]
-        //[Alias("user", "whois")]
-        public async Task ClearMimicDataAsync(SocketUser user)
+        public async Task ClearMimicDataAsync()
         {
-            var userInfo = user ?? Context.Client.CurrentUser;
-
-            if (CommandHandler._instance.MarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
+            if (CommandHandler._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
             {
-                playerData.nGramChain.ClearData();
-                playerData.wordChain.ClearData();
+                userData.nGramChain.ClearData();
+                userData.wordChain.ClearData();
                 await ReplyAsync("Done!");
             }
             else
             {
-                await ReplyAsync($"Oh no, I could not delete {user?.Username ?? "their"} data");
+                await ReplyAsync($"{Context.User.Mention}, you are not in my system");
             }
         }
 
@@ -75,6 +72,40 @@ namespace Luna
         {
             CommandHandler._instance.SaveMimicData();
             await ReplyAsync("Saved!");
+        }
+
+        [Command("ignoreMe")]
+        [Summary("ignore my messages for now")]
+        public async Task IgnoreMimicDataAsync()
+        {
+            if (CommandHandler._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
+            {
+                userData.TrackMe = false;
+                await ReplyAsync($"Ingoring {Context.User.Mention}");
+            }
+            else
+            {
+                await ReplyAsync($"{Context.User.Mention}, you are not in my system");
+            }
+        }
+
+        [Command("trackMe")]
+        [Summary("track my messages for now")]
+        public async Task TrackMimicDataAsync()
+        {
+            if (CommandHandler._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
+            {
+                userData.TrackMe = true;
+                await ReplyAsync($"Tracking {Context.User.Mention}");
+            }
+            else
+            {
+                userData = new CustomUserData(Context.User.Id);
+                userData.TrackMe = true;
+                CommandHandler._instance.AllUserData.Add(Context.User.Id, userData);
+
+                await ReplyAsync($"{Context.User.Mention}, added you to my system");
+            }
         }
     }
 }

@@ -10,19 +10,33 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
+using Discord.Rest;
 
 namespace Luna
 {
     class CommandHandler
     {
+        public const string userTrackFile = "trackUsers.txt";
+
         public static CommandHandler _instance;
 
         private readonly DiscordSocketClient _client;
         private readonly CommandService _commands;
 
         private static Mutex _mutex = new Mutex();
-        private Dictionary<ulong, PlayerMarkovData> _markovData;
-        public Dictionary<ulong, PlayerMarkovData> MarkovData { get { return _markovData; } }
+        private Dictionary<ulong, CustomUserData> _allUserData;
+        public Dictionary<ulong, CustomUserData> AllUserData { get { return _allUserData; } }
+        public bool GetConsentualUser(ulong id, out CustomUserData userData)
+        {
+            if (_allUserData.TryGetValue(id, out userData))
+            {
+                userData = userData.TrackMe ? userData : null;
+                return userData.TrackMe;
+            }
+            return false;
+        }
+
+        const string consentMessage = "Hello, I am a consentual Bot. You can use `!ignoreMe` and `!trackMe` to toggle your privacy. Or you can react to this message with ❌ or ✅";
 
         Random r = new Random();
 
@@ -32,7 +46,7 @@ namespace Luna
             _commands = commands;
             _client = client;
 
-            _markovData = new Dictionary<ulong, PlayerMarkovData>();
+            _allUserData = new Dictionary<ulong, CustomUserData>();
 
             _instance = this;
         }
@@ -45,6 +59,8 @@ namespace Luna
             _commands.CommandExecuted += OnCommandExecutedAsync;
             // Hook the MessageReceived event into our command handler
             _client.MessageReceived += HandleCommandAsync;
+
+            _client.ReactionAdded += HandleReactionAddedAsync;
 
             // Here we discover all of the command modules in the entry 
             // assembly and load them. Starting from Discord.NET 2.0, a
@@ -76,6 +92,49 @@ namespace Luna
             Console.WriteLine($"{commandName} was executed at {DateTime.UtcNow}.");
         }
 
+        private async Task HandleReactionAddedAsync(Cacheable<IUserMessage, ulong> before, ISocketMessageChannel channel, SocketReaction reaction)
+        {
+            var message = await before.GetOrDownloadAsync();
+            if (message.Author.Id == _client.CurrentUser.Id && message.Content == consentMessage && reaction.UserId != _client.CurrentUser.Id)
+            {
+                if (!AllUserData.TryGetValue(reaction.UserId, out CustomUserData userData))
+                {
+                    userData = _allUserData[reaction.UserId] = new CustomUserData(reaction.UserId);
+                }
+
+                var checkEmoji = new Emoji("\u2705"); //✅
+                var exEmoji = new Emoji("\u274C"); //❌
+                IEmote oppositeEmoji = null;
+                if (reaction.Emote.Equals(checkEmoji))
+                {
+                    Console.WriteLine($"{reaction.UserId} ✅");
+                    userData.TrackMe = true;
+                    oppositeEmoji = exEmoji;
+                }
+                else if (reaction.Emote.Equals(exEmoji))
+                {
+                    Console.WriteLine($"{reaction.UserId} ❌");
+                    userData.TrackMe = false;
+                    oppositeEmoji = checkEmoji;
+                }
+
+                // if the user reacted with both emojis, toggle the opposite one
+                if(oppositeEmoji != null)
+                {
+                    var test = message.GetReactionUsersAsync(oppositeEmoji, 100);
+                    var enumerator = test.GetEnumerator();
+                    while (await enumerator.MoveNext())
+                    {
+                        if (enumerator.Current.Select(x => x.Id).Contains(reaction.UserId))
+                        {
+                            await message.RemoveReactionAsync(oppositeEmoji, reaction.User.Value);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         private async Task HandleCommandAsync(SocketMessage messageParam)
         {
             // Don't process the command if it was a system message
@@ -89,16 +148,33 @@ namespace Luna
                 && !message.Content.StartsWith('!')
                 && (!message.Content.StartsWith('?') || message.Content.StartsWith("?roll")))
             {
+                if (message.Content.Contains("say hello", StringComparison.OrdinalIgnoreCase) && message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id))
+                {
+                    var context2 = new SocketCommandContext(_client, message);
+                    RestUserMessage rm = await context2.Channel.SendMessageAsync(consentMessage);
+                    
+                    var checkEmoji = new Emoji("\u2705"); //✅
+                    var exEmoji = new Emoji("\u274C"); //❌
+                    await rm.AddReactionAsync(checkEmoji);
+                    await rm.AddReactionAsync(exEmoji);
+                    return;
+                }
+
                 if (message.Channel is IDMChannel || message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id))
                 {
-                    KeyValuePair<ulong, PlayerMarkovData> kvp = _markovData.ElementAt(r.Next(_markovData.Count));
+                    var validUsers = _allUserData.Where(x => x.Value.TrackMe);
 
-                    bool useNGram = r.NextDouble() > 0.65;
-                    MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
-                    string newMessageText = markov.GenerateSequence(r, r.Next(5, 120), !useNGram);
+                    if (validUsers.Any())
+                    {
+                        var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
 
-                    var context2 = new SocketCommandContext(_client, message);
-                    await context2.Channel.SendMessageAsync(newMessageText);
+                        bool useNGram = r.NextDouble() > 0.65;
+                        MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
+                        string newMessageText = markov.GenerateSequence(r, r.Next(5, 120), !useNGram);
+
+                        var context2 = new SocketCommandContext(_client, message);
+                        await context2.Channel.SendMessageAsync(newMessageText);
+                    }
                 }
 
                 string mimicString = message.Content;
@@ -107,6 +183,7 @@ namespace Luna
                     Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
                     mimicString = userIDRegex.Replace(mimicString, u.Username);
                 }
+                mimicString.Replace("@everyone", "everyone");
                 _ = Task.Run(() => LogMimicData(message.Author.Id, mimicString));
             }
 
@@ -140,23 +217,23 @@ namespace Luna
             foreach (string file in mimicFiles)
             {
                 string fileName = Path.GetFileNameWithoutExtension(file);
-                if (fileName.StartsWith(PlayerMarkovData.wordMarkovPrefix))
+                if (fileName.StartsWith(CustomUserData.wordMarkovPrefix))
                 {
-                    ulong id = ulong.Parse(fileName.Substring(PlayerMarkovData.wordMarkovPrefix.Length));
-                    if (!_markovData.TryGetValue(id, out PlayerMarkovData playerData))
+                    ulong id = ulong.Parse(fileName.Substring(CustomUserData.wordMarkovPrefix.Length));
+                    if (!_allUserData.TryGetValue(id, out CustomUserData playerData))
                     {
-                        playerData = _markovData[id] = new PlayerMarkovData(id);
+                        playerData = _allUserData[id] = new CustomUserData(id);
                     }
 
                     try { playerData.wordChain.LoadFromSave(file); }
                     catch (FileNotFoundException e) { }
                 }
-                else if (fileName.StartsWith(PlayerMarkovData.gramMarkovPrefix))
+                else if (fileName.StartsWith(CustomUserData.gramMarkovPrefix))
                 {
-                    ulong id = ulong.Parse(fileName.Substring(PlayerMarkovData.gramMarkovPrefix.Length));
-                    if (!_markovData.TryGetValue(id, out PlayerMarkovData playerData))
+                    ulong id = ulong.Parse(fileName.Substring(CustomUserData.gramMarkovPrefix.Length));
+                    if (!_allUserData.TryGetValue(id, out CustomUserData playerData))
                     {
-                        playerData = _markovData[id] = new PlayerMarkovData(id);
+                        playerData = _allUserData[id] = new CustomUserData(id);
                     }
 
                     try { playerData.nGramChain.LoadFromSave(file); }
@@ -164,38 +241,68 @@ namespace Luna
                 }
             }
             _mutex.ReleaseMutex();
+
+            if (File.Exists(mimicDataPath + "/" + userTrackFile))
+            {
+                using (StreamReader sr = new StreamReader(mimicDataPath + "/" + userTrackFile))
+                {
+                    if (ulong.TryParse(sr.ReadLine(), out ulong id))
+                    {
+                        if (!_allUserData.TryGetValue(id, out CustomUserData playerData))
+                        {
+                            playerData = _allUserData[id] = new CustomUserData(id);
+                        }
+
+                        playerData.TrackMe = true;
+                    }
+                }
+            }
         }
 
         private void LogMimicData(ulong id, string message)
         {
             _mutex.WaitOne();
 
-            if (!_markovData.TryGetValue(id, out PlayerMarkovData playerData))
+            if (!_allUserData.TryGetValue(id, out CustomUserData userData))
             {
-                playerData = _markovData[id] = new PlayerMarkovData(id);
+                userData = _allUserData[id] = new CustomUserData(id);
 
                 string mimicDataPath = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH", EnvironmentVariableTarget.User);
 
-                try { playerData.wordChain.LoadFromSave(mimicDataPath + "/" + playerData.MarkovWordPath); }
+                try { userData.wordChain.LoadFromSave(mimicDataPath + "/" + userData.MarkovWordPath); }
                 catch (FileNotFoundException e) { }
-                try { playerData.nGramChain.LoadFromSave(mimicDataPath + "/" + playerData.MarkovGramPath); }
+                try { userData.nGramChain.LoadFromSave(mimicDataPath + "/" + userData.MarkovGramPath); }
                 catch (FileNotFoundException e) { }
             }
 
             _mutex.ReleaseMutex();
 
-            Console.WriteLine($"{id} {message}");
-            playerData.nGramChain.LoadNGrams(message, 6);
-            playerData.wordChain.LoadGramsDelimeter(message, " ");
+            if (userData.TrackMe)
+            {
+                Console.WriteLine($"{id} {message}");
+                userData.nGramChain.LoadNGrams(message, 6);
+                userData.wordChain.LoadGramsDelimeter(message, " ");
+            }
         }
 
         public void SaveMimicData()
         {
             string mimicDataPath = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH", EnvironmentVariableTarget.User);
-            foreach (KeyValuePair<ulong, PlayerMarkovData> kvp in _markovData)
+            foreach (KeyValuePair<ulong, CustomUserData> kvp in _allUserData)
             {
                 kvp.Value.wordChain.Save(mimicDataPath + "/" + kvp.Value.MarkovWordPath);
                 kvp.Value.nGramChain.Save(mimicDataPath + "/" + kvp.Value.MarkovGramPath);
+            }
+
+            using (StreamWriter sw = new StreamWriter(mimicDataPath + "/" + userTrackFile))
+            {
+                foreach (KeyValuePair<ulong, CustomUserData> kvp in _allUserData)
+                {
+                    if (kvp.Value.TrackMe)
+                    {
+                        sw.WriteLine(kvp.Key);
+                    }
+                }
             }
         }
     }

@@ -4,9 +4,10 @@ using System.Text;
 
 namespace Luna
 {
-    public class PlayerMarkovData
+    public class CustomUserData
     {
         public readonly ulong pId;
+
         public MarkovChain wordChain;
         public MarkovChain nGramChain;
 
@@ -15,7 +16,9 @@ namespace Luna
         public string MarkovWordPath => $"{wordMarkovPrefix}{pId}.json";
         public string MarkovGramPath => $"{gramMarkovPrefix}{pId}.json";
 
-        public PlayerMarkovData(ulong pId)
+        public bool TrackMe = false;
+
+        public CustomUserData(ulong pId)
         {
             this.pId = pId;
 
