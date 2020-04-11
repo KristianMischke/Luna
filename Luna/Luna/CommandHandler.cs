@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -19,8 +20,8 @@ namespace Luna
         private readonly CommandService _commands;
 
         private static Mutex _mutex = new Mutex();
-        private Dictionary<ulong, PlayerMarkovData> _playerMarkovData;
-        public Dictionary<ulong, PlayerMarkovData> PlayerMarkovData { get { return _playerMarkovData; } }
+        private Dictionary<ulong, PlayerMarkovData> _markovData;
+        public Dictionary<ulong, PlayerMarkovData> MarkovData { get { return _markovData; } }
 
         // Retrieve client and CommandService instance via ctor
         public CommandHandler(DiscordSocketClient client, CommandService commands)
@@ -28,13 +29,15 @@ namespace Luna
             _commands = commands;
             _client = client;
 
-            _playerMarkovData = new Dictionary<ulong, PlayerMarkovData>();
+            _markovData = new Dictionary<ulong, PlayerMarkovData>();
 
             _instance = this;
         }
 
         public async Task SetupAsync()
         {
+            _ = Task.Run(() => LoadMimicData());
+
             // Hook the execution event
             _commands.CommandExecuted += OnCommandExecutedAsync;
             // Hook the MessageReceived event into our command handler
@@ -75,10 +78,21 @@ namespace Luna
             // Don't process the command if it was a system message
             var message = messageParam as SocketUserMessage;
             if (message == null) return;
-            
-            if (message.Author.Id != _client.CurrentUser.Id && !message.Author.IsBot)
+
+            if (message.Author.Id != _client.CurrentUser.Id
+                && !message.Author.IsBot
+                && !string.IsNullOrEmpty(message.Content)
+                && !message.Content.StartsWith('~')
+                && !message.Content.StartsWith('!')
+                && (!message.Content.StartsWith('?') || message.Content.StartsWith("?roll")))
             {
-                _ = Task.Run(() => LogMimicData(message.Author.Id, message.Content));
+                string mimicString = message.Content;
+                foreach (SocketUser u in message.MentionedUsers)
+                {
+                    Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
+                    mimicString = userIDRegex.Replace(mimicString, u.Username);
+                }
+                _ = Task.Run(() => LogMimicData(message.Author.Id, mimicString));
             }
 
             // Create a number to track where the prefix ends and the command begins
@@ -101,13 +115,49 @@ namespace Luna
                 services: null);
         }
 
+        private void LoadMimicData()
+        {
+            _mutex.WaitOne();
+            string mimicDataPath = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH", EnvironmentVariableTarget.User);
+
+            string[] mimicFiles = Directory.GetFiles(mimicDataPath);
+
+            foreach (string file in mimicFiles)
+            {
+                string fileName = Path.GetFileNameWithoutExtension(file);
+                if (fileName.StartsWith(PlayerMarkovData.wordMarkovPrefix))
+                {
+                    ulong id = ulong.Parse(fileName.Substring(PlayerMarkovData.wordMarkovPrefix.Length));
+                    if (!_markovData.TryGetValue(id, out PlayerMarkovData playerData))
+                    {
+                        playerData = _markovData[id] = new PlayerMarkovData(id);
+                    }
+
+                    try { playerData.wordChain.LoadFromSave(file); }
+                    catch (FileNotFoundException e) { }
+                }
+                else if (fileName.StartsWith(PlayerMarkovData.gramMarkovPrefix))
+                {
+                    ulong id = ulong.Parse(fileName.Substring(PlayerMarkovData.gramMarkovPrefix.Length));
+                    if (!_markovData.TryGetValue(id, out PlayerMarkovData playerData))
+                    {
+                        playerData = _markovData[id] = new PlayerMarkovData(id);
+                    }
+
+                    try { playerData.nGramChain.LoadFromSave(file); }
+                    catch (FileNotFoundException e) { }
+                }
+            }
+            _mutex.ReleaseMutex();
+        }
+
         private void LogMimicData(ulong id, string message)
         {
             _mutex.WaitOne();
 
-            if (!_playerMarkovData.TryGetValue(id, out PlayerMarkovData playerData))
+            if (!_markovData.TryGetValue(id, out PlayerMarkovData playerData))
             {
-                playerData = _playerMarkovData[id] = new PlayerMarkovData(id);
+                playerData = _markovData[id] = new PlayerMarkovData(id);
 
                 string mimicDataPath = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH", EnvironmentVariableTarget.User);
 
@@ -127,7 +177,7 @@ namespace Luna
         public void Cleanup()
         {
             string mimicDataPath = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH", EnvironmentVariableTarget.User);
-            foreach (KeyValuePair<ulong, PlayerMarkovData> kvp in _playerMarkovData)
+            foreach (KeyValuePair<ulong, PlayerMarkovData> kvp in _markovData)
             {
                 kvp.Value.wordChain.Save(mimicDataPath + "/" + kvp.Value.MarkovWordPath);
                 kvp.Value.nGramChain.Save(mimicDataPath + "/" + kvp.Value.MarkovGramPath);

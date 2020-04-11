@@ -32,6 +32,13 @@ public class MarkovChain
         states.Add(START_GRAM.gram, START_GRAM);
     }
 
+    public void ClearData()
+    {
+        states.Clear();
+        order = -1;
+        states.Add(START_GRAM.gram, START_GRAM);
+    }
+
     public bool LoadFromSave(string filepath)
     {
         if (!File.Exists(filepath))

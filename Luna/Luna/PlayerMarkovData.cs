@@ -10,8 +10,10 @@ namespace Luna
         public MarkovChain wordChain;
         public MarkovChain nGramChain;
 
-        public string MarkovWordPath => $"wordMarkov_{pId}.json";
-        public string MarkovGramPath => $"gramMarkov_{pId}.json";
+        public const string wordMarkovPrefix = "wordMarkov_";
+        public const string gramMarkovPrefix = "gramMarkov_";
+        public string MarkovWordPath => $"{wordMarkovPrefix}{pId}.json";
+        public string MarkovGramPath => $"{gramMarkovPrefix}{pId}.json";
 
         public PlayerMarkovData(ulong pId)
         {

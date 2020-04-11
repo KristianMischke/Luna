@@ -21,7 +21,7 @@ namespace Luna
         {
             var userInfo = user ?? Context.Client.CurrentUser;
 
-            if (CommandHandler._instance.PlayerMarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
+            if (CommandHandler._instance.MarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
             {
                 await ReplyAsync(playerData.wordChain.GenerateSequence(r, r.Next(10, 80), true));
             }
@@ -40,13 +40,32 @@ namespace Luna
         {
             var userInfo = user ?? Context.Client.CurrentUser;
 
-            if (CommandHandler._instance.PlayerMarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
+            if (CommandHandler._instance.MarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
             {
-                await ReplyAsync(playerData.nGramChain.GenerateSequence(r, r.Next(10, 80), true));
+                await ReplyAsync(playerData.nGramChain.GenerateSequence(r, r.Next(10, 80), false));
             }
             else
             {
                 await ReplyAsync($"Oh no, I could not mimic {user?.Username ?? "them"}");
+            }
+        }
+
+        [Command("clearMimic")]
+        [Summary("Bye bye data")]
+        //[Alias("user", "whois")]
+        public async Task ClearMimicDataAsync(SocketUser user)
+        {
+            var userInfo = user ?? Context.Client.CurrentUser;
+
+            if (CommandHandler._instance.MarkovData.TryGetValue(userInfo.Id, out PlayerMarkovData playerData))
+            {
+                playerData.nGramChain.ClearData();
+                playerData.wordChain.ClearData();
+                await ReplyAsync("Done!");
+            }
+            else
+            {
+                await ReplyAsync($"Oh no, I could not delete {user?.Username ?? "their"} data");
             }
         }
     }
