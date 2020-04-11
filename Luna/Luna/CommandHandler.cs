@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace Luna
 {
@@ -22,6 +23,8 @@ namespace Luna
         private static Mutex _mutex = new Mutex();
         private Dictionary<ulong, PlayerMarkovData> _markovData;
         public Dictionary<ulong, PlayerMarkovData> MarkovData { get { return _markovData; } }
+
+        Random r = new Random();
 
         // Retrieve client and CommandService instance via ctor
         public CommandHandler(DiscordSocketClient client, CommandService commands)
@@ -86,6 +89,18 @@ namespace Luna
                 && !message.Content.StartsWith('!')
                 && (!message.Content.StartsWith('?') || message.Content.StartsWith("?roll")))
             {
+                if (message.Channel is IDMChannel || message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id))
+                {
+                    KeyValuePair<ulong, PlayerMarkovData> kvp = _markovData.ElementAt(r.Next(_markovData.Count));
+
+                    bool useNGram = r.NextDouble() > 0.65;
+                    MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
+                    string newMessageText = markov.GenerateSequence(r, r.Next(5, 120), !useNGram);
+
+                    var context2 = new SocketCommandContext(_client, message);
+                    await context2.Channel.SendMessageAsync(newMessageText);
+                }
+
                 string mimicString = message.Content;
                 foreach (SocketUser u in message.MentionedUsers)
                 {
@@ -174,7 +189,7 @@ namespace Luna
             playerData.wordChain.LoadGramsDelimeter(message, " ");
         }
 
-        public void Cleanup()
+        public void SaveMimicData()
         {
             string mimicDataPath = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH", EnvironmentVariableTarget.User);
             foreach (KeyValuePair<ulong, PlayerMarkovData> kvp in _markovData)

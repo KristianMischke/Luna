@@ -68,5 +68,13 @@ namespace Luna
                 await ReplyAsync($"Oh no, I could not delete {user?.Username ?? "their"} data");
             }
         }
+
+        [Command("saveMimics")]
+        [Summary("Save me now")]
+        public async Task SaveMimicDataAsync()
+        {
+            CommandHandler._instance.SaveMimicData();
+            await ReplyAsync("Saved!");
+        }
     }
 }

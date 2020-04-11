@@ -65,7 +65,7 @@ namespace Luna
 
         private static bool Handler(CtrlType sig)
         {
-            CommandHandler._instance.Cleanup();
+            CommandHandler._instance.SaveMimicData();
             return false;
         }
     }
