@@ -21,7 +21,7 @@ namespace Luna
         {
             var userInfo = user ?? Context.Client.CurrentUser;
 
-            if (CommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
                 await ReplyAsync(userData.wordChain.GenerateSequence(r, r.Next(10, 80), true));
             }
@@ -40,7 +40,7 @@ namespace Luna
         {
             var userInfo = user ?? Context.Client.CurrentUser;
 
-            if (CommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
                 await ReplyAsync(userData.nGramChain.GenerateSequence(r, r.Next(10, 80), false));
             }
@@ -50,11 +50,19 @@ namespace Luna
             }
         }
 
-        [Command("clearMe")]
+        [Command("saveMimics", true)]
+        [Summary("Save me now")]
+        public async Task SaveMimicDataAsync()
+        {
+            MimicCommandHandler._instance.SaveMimicData();
+            await ReplyAsync("Saved!");
+        }
+
+        [Command("clearMe", true)]
         [Summary("Bye bye data")]
         public async Task ClearMimicDataAsync()
         {
-            if (CommandHandler._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
+            if (CommandManager._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
             {
                 userData.nGramChain.ClearData();
                 userData.wordChain.ClearData();
@@ -66,19 +74,11 @@ namespace Luna
             }
         }
 
-        [Command("saveMimics")]
-        [Summary("Save me now")]
-        public async Task SaveMimicDataAsync()
-        {
-            CommandHandler._instance.SaveMimicData();
-            await ReplyAsync("Saved!");
-        }
-
-        [Command("ignoreMe")]
+        [Command("ignoreMe", true)]
         [Summary("ignore my messages for now")]
         public async Task IgnoreMimicDataAsync()
         {
-            if (CommandHandler._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
+            if (CommandManager._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
             {
                 userData.TrackMe = false;
                 await ReplyAsync($"Ingoring {Context.User.Mention}");
@@ -89,11 +89,11 @@ namespace Luna
             }
         }
 
-        [Command("trackMe")]
+        [Command("trackMe", true)]
         [Summary("track my messages for now")]
         public async Task TrackMimicDataAsync()
         {
-            if (CommandHandler._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
+            if (CommandManager._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
             {
                 userData.TrackMe = true;
                 await ReplyAsync($"Tracking {Context.User.Mention}");
@@ -102,7 +102,7 @@ namespace Luna
             {
                 userData = new CustomUserData(Context.User.Id);
                 userData.TrackMe = true;
-                CommandHandler._instance.AllUserData.Add(Context.User.Id, userData);
+                CommandManager._instance.AllUserData.Add(Context.User.Id, userData);
 
                 await ReplyAsync($"{Context.User.Mention}, added you to my system");
             }

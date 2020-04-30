@@ -7,6 +7,16 @@
 
   <ItemGroup>
     <PackageReference Include="Discord.Net" Version="2.1.1" />
+    <PackageReference Include="symspell" Version="6.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="C:\Users\krist\.nuget\packages\symspell\6.5.0\contentFiles\any\netstandard2.0\frequency_bigramdictionary_en_243_342.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="C:\Users\krist\.nuget\packages\symspell\6.5.0\contentFiles\any\netstandard2.0\frequency_dictionary_en_82_765.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

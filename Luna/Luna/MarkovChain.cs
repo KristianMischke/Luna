@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Luna.System;
 
 public class MarkovChain
 {
@@ -127,9 +128,12 @@ public class MarkovChain
         this.order = order;
         List<string> grams = new List<string>();
 
-        for (int i = 0; i < text.Length; i += order)
+        int i = 0;
+        while (i < text.Length)
         {
-            grams.Add(text.Substring(i, Math.Min(order, text.Length - i)));
+            string gram = text.UnicodeSafeSubstring(i, Math.Min(order, text.Length - i));
+            grams.Add(gram);
+            i += gram.Length;
         }
 
         LoadGrams(grams);

@@ -15,7 +15,7 @@ namespace Luna
         private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
 
         private delegate bool EventHandler(CtrlType sig);
-        static EventHandler _handler;
+        static EventHandler _onExitHandler;
 
         enum CtrlType
         {
@@ -29,7 +29,7 @@ namespace Luna
         private DiscordSocketClient _client;
         private CommandService _commandService;
 
-        private CommandHandler _commandHandler;
+        private CommandManager _commandHandler;
         
         public static void Main(string[] args) => new Program().MainAsync().GetAwaiter().GetResult();
 
@@ -46,12 +46,14 @@ namespace Luna
             await _client.LoginAsync(TokenType.Bot, token);
             await _client.StartAsync();
 
-            _commandHandler = new CommandHandler(_client, _commandService);
+            _commandHandler = new CommandManager(_client, _commandService);
+            _commandHandler.AddCustomCommandHandler(new MimicCommandHandler(_client));
+            _commandHandler.AddCustomCommandHandler(new GameCommandHandler(_client));
             await _commandHandler.SetupAsync();
 
             // Some biolerplate to react to close window event
-            _handler += new EventHandler(Handler);
-            SetConsoleCtrlHandler(_handler, true);
+            _onExitHandler += new EventHandler(ExitHandler);
+            SetConsoleCtrlHandler(_onExitHandler, true);
 
             // Block this task until the program is closed.
             await Task.Delay(-1);
@@ -63,9 +65,9 @@ namespace Luna
             return Task.CompletedTask;
         }
 
-        private static bool Handler(CtrlType sig)
+        private static bool ExitHandler(CtrlType sig)
         {
-            CommandHandler._instance.SaveMimicData();
+            CommandManager._instance.Cleanup();
             return false;
         }
     }
