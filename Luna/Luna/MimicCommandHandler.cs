@@ -17,13 +17,90 @@ namespace Luna
     {
         public static MimicCommandHandler _instance;
 
-        public const string userTrackFile = "trackUsers.txt";
-        public const string consentMessage = "Hello, I am a consentual Bot. You can use `!ignoreMe` and `!trackMe` to toggle your privacy. Or you can react to this message with ❌ or ✅";
+        public const string USER_TRACK_FILE = "trackUsers.txt";
+        public const string CONSENT_MESSAGE = "Hello, I am a consentual Bot. You can use `!ignoreMe` and `!trackMe` to toggle your privacy. Or you can react to this message with ❌ or ✅";
+
+        public const string CORNELL_MOVIE_SCRIPTS_FILE = "/cornell_movie_quotes_corpus/moviequotes.scripts.txt";
+        public const string MOVIE_QUOTE_MARKOV_SAVE = "/moviequote_markov.json";
+
+        //---------------
+        public enum AndbrainColumn
+        {
+            WORD = 0,
+            DISGUST,
+            SURPRISE,
+            NEUTRAL,
+            ANGER,
+            SADNESS,
+            HAPPINESS,
+            FEAR,
+
+            COUNT
+        }
+        public struct WordEmotion
+        {
+            public float disgust, surprise, neutral, anger, sadness, happiness, fear;
+            public string word;
+
+            public static WordEmotion operator +(WordEmotion e0, WordEmotion e1)
+            {
+                return new WordEmotion
+                {
+                    word        = e0.word,
+                    disgust     = e0.disgust   + e1.disgust,
+                    surprise    = e0.surprise  + e1.surprise,
+                    neutral     = e0.neutral   + e1.neutral,
+                    anger       = e0.anger     + e1.anger,
+                    sadness     = e0.sadness   + e1.sadness,
+                    happiness   = e0.happiness + e1.happiness,
+                    fear        = e0.fear      + e1.fear,
+                };
+            }
+
+            public static WordEmotion operator /(WordEmotion e0, float f)
+            {
+                return new WordEmotion
+                {
+                    word = e0.word,
+                    disgust = e0.disgust / f,
+                    surprise = e0.surprise / f,
+                    neutral = e0.neutral / f,
+                    anger = e0.anger / f,
+                    sadness = e0.sadness / f,
+                    happiness = e0.happiness / f,
+                    fear = e0.fear / f,
+                };
+            }
+        }
+
+        public Dictionary<string, WordEmotion> andbrainWordDB = new Dictionary<string, WordEmotion>();
+        //---------------
+
+        //---------------
+        public enum HedonometerColumn
+        {
+            WORD = 1,
+            HAPPINESS = 3,
+            STANDARD_DEVIATION = 4,
+
+            COUNT = 5
+        }
+        public struct HedonometerEntry
+        {
+            public string word;
+            public float happiness, sd;
+        }
+        public Dictionary<string, HedonometerEntry> hedonometerDB = new Dictionary<string, HedonometerEntry>();
+        //---------------
+
+        public Dictionary<string, float> militaryWordDB = new Dictionary<string, float>();
 
         private readonly DiscordSocketClient _client;
 
-        private static Mutex _mutex = new Mutex();
+        private static Semaphore _semaphore = new Semaphore(1, 1);
         private Random r = new Random();
+
+        private MarkovChain movieScriptMarkov = new MarkovChain();
 
         Dictionary<ulong, CustomUserData> AllUserData => CommandManager._instance.AllUserData;
 
@@ -58,7 +135,7 @@ namespace Luna
 
         public async Task SetupAsync()
         {
-            _mutex.WaitOne();
+            _semaphore.WaitOne();
 
             { // load dictionary
                 int initialCapacity = 82765;
@@ -84,6 +161,122 @@ namespace Luna
                 }
             }
 
+            { // emotional word dataset
+                if (File.Exists(MimicDirectory + "/Andbrain/Andbrain_DataSet.csv"))
+                {
+                    using (StreamReader sr = new StreamReader(MimicDirectory + "/Andbrain/Andbrain_DataSet.csv"))
+                    {
+                        int i = 0;
+                        string line;
+                        do
+                        {
+                            line = await sr.ReadLineAsync();
+                            string[] entry = line?.Split(',');
+                            if (i > 0 && entry != null && entry.Length == (int)AndbrainColumn.COUNT)
+                            {
+                                string word = entry[(int)AndbrainColumn.WORD].Trim();
+
+                                andbrainWordDB.Add(word, new WordEmotion
+                                {
+                                    word = word,
+                                    disgust = float.Parse(entry[(int)AndbrainColumn.DISGUST]),
+                                    surprise = float.Parse(entry[(int)AndbrainColumn.SURPRISE]),
+                                    neutral = float.Parse(entry[(int)AndbrainColumn.NEUTRAL]),
+                                    anger = float.Parse(entry[(int)AndbrainColumn.ANGER]),
+                                    sadness = float.Parse(entry[(int)AndbrainColumn.SADNESS]),
+                                    happiness = float.Parse(entry[(int)AndbrainColumn.HAPPINESS]),
+                                    fear = float.Parse(entry[(int)AndbrainColumn.FEAR]),
+                                });
+                            }
+                            i++;
+                        } while (line != null);
+                    }
+                }
+            }
+
+            { // hedonometer word sentiment dataset
+                if (File.Exists(MimicDirectory + "/hedonometer/Hedonometer.csv"))
+                {
+                    using (StreamReader sr = new StreamReader(MimicDirectory + "/hedonometer/Hedonometer.csv"))
+                    {
+                        string line;
+                        int i = 0;
+                        do
+                        {
+                            line = await sr.ReadLineAsync();
+                            string[] entry = line?.Split(',');
+                            if (i > 0 && entry != null && entry.Length == (int)HedonometerColumn.COUNT)
+                            {
+                                string word = entry[(int)HedonometerColumn.WORD].Trim('\"');
+
+                                hedonometerDB.Add(word, new HedonometerEntry
+                                {
+                                    word = word,
+                                    happiness = float.Parse(entry[(int)HedonometerColumn.HAPPINESS].Trim('\"')),
+                                    sd = float.Parse(entry[(int)HedonometerColumn.STANDARD_DEVIATION].Trim('\"'))
+                                });
+                            }
+                            i++;
+                        } while (line != null);
+                    }
+                }
+            }
+
+            { // military terms
+                if (File.Exists(MimicDirectory + "/military_terms.txt"))
+                {
+                    using (StreamReader sr = new StreamReader(MimicDirectory + "/military_terms.txt"))
+                    {
+                        string line;
+                        do
+                        {
+                            line = await sr.ReadLineAsync();
+                            string[] entry = line?.Split(':');
+                            if (entry != null)
+                            {
+                                if (entry.Length == 2)
+                                {
+                                    militaryWordDB.TryAdd(entry[0], float.Parse(entry[1]));
+                                }
+                                else
+                                {
+                                    militaryWordDB.TryAdd(line, 0.05f);
+                                }
+                            }
+                        } while (line != null);
+                    }
+                }
+            }
+
+            { // movie script markov
+                if (!File.Exists(MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE))
+                {
+                    if (File.Exists(MimicDirectory + CORNELL_MOVIE_SCRIPTS_FILE))
+                    {
+                        using (StreamReader sr = new StreamReader(MimicDirectory + CORNELL_MOVIE_SCRIPTS_FILE))
+                        {
+                            int count = 0;
+                            string line;
+                            do
+                            {
+                                line = await sr.ReadLineAsync();
+
+                                string[] arr = line.Split(" +++$+++ ");
+
+                                movieScriptMarkov.LoadNGrams(arr[arr.Length - 1], 6);
+
+                                count++;
+                            } while (line != null && count < 100000);
+                        }
+                    }
+                }
+                else
+                {
+                    try { movieScriptMarkov.LoadFromSave(MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE); }
+                    catch (FileNotFoundException e) { }
+                    catch (Exception e) { Console.WriteLine($"Path: {MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE}\nException: {e.Message}\nStack: {e.StackTrace}"); }
+                }
+            }
 
             string[] mimicFiles = Directory.GetFiles(MimicDirectory);
 
@@ -100,6 +293,7 @@ namespace Luna
 
                     try { playerData.wordChain.LoadFromSave(file); }
                     catch (FileNotFoundException e) { }
+                    catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
                 else if (fileName.StartsWith(CustomUserData.gramMarkovPrefix))
                 {
@@ -111,13 +305,13 @@ namespace Luna
 
                     try { playerData.nGramChain.LoadFromSave(file); }
                     catch (FileNotFoundException e) { }
+                    catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
             }
-            _mutex.ReleaseMutex();
 
-            if (File.Exists(MimicDirectory + "/" + userTrackFile))
+            if (File.Exists(MimicDirectory + "/" + USER_TRACK_FILE))
             {
-                using (StreamReader sr = new StreamReader(MimicDirectory + "/" + userTrackFile))
+                using (StreamReader sr = new StreamReader(MimicDirectory + "/" + USER_TRACK_FILE))
                 {
                     string line;
                     do
@@ -135,6 +329,7 @@ namespace Luna
                     } while (line != null);
                 }
             }
+            _semaphore.Release();
         }
 
         public void Cleanup()
@@ -144,13 +339,15 @@ namespace Luna
 
         public void SaveMimicData()
         {
+            movieScriptMarkov.Save(MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE);
+
             foreach (KeyValuePair<ulong, CustomUserData> kvp in AllUserData)
             {
                 kvp.Value.wordChain.Save(MimicDirectory + "/" + kvp.Value.MarkovWordPath);
                 kvp.Value.nGramChain.Save(MimicDirectory + "/" + kvp.Value.MarkovGramPath);
             }
 
-            using (StreamWriter sw = new StreamWriter(MimicDirectory + "/" + userTrackFile))
+            using (StreamWriter sw = new StreamWriter(MimicDirectory + "/" + USER_TRACK_FILE))
             {
                 foreach (KeyValuePair<ulong, CustomUserData> kvp in AllUserData)
                 {
@@ -167,7 +364,6 @@ namespace Luna
             bool iAmMentioned = message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id);
 
             if (message.Author.Id != _client.CurrentUser.Id
-                && !message.Author.IsBot
                 && !string.IsNullOrEmpty(message.Content)
                 && !message.Content.StartsWith('~')
                 && !message.Content.StartsWith('!')
@@ -177,7 +373,7 @@ namespace Luna
                 if (message.Content.Contains("say hello", StringComparison.OrdinalIgnoreCase) && iAmMentioned)
                 {
                     var context2 = new SocketCommandContext(_client, message);
-                    RestUserMessage rm = await context2.Channel.SendMessageAsync(consentMessage);
+                    RestUserMessage rm = await context2.Channel.SendMessageAsync(CONSENT_MESSAGE);
 
                     var checkEmoji = new Emoji("\u2705"); //✅
                     var exEmoji = new Emoji("\u274C"); //❌
@@ -185,7 +381,7 @@ namespace Luna
                     await rm.AddReactionAsync(exEmoji);
                     return;
                 }
-
+                
                 if (message.Channel is IDMChannel || iAmMentioned)
                 {
                     var validUsers = AllUserData.Where(x => x.Value.TrackMe);
@@ -194,9 +390,12 @@ namespace Luna
                     {
                         var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
 
+                        bool useMovieQuote = r.NextDouble() > 0.8f;
                         bool useNGram = r.NextDouble() > 0.65;
                         MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
-                        string newMessageText = markov.GenerateSequence(r, r.Next(25, 180), !useNGram);
+                        if (useMovieQuote)
+                            markov = movieScriptMarkov;
+                        string newMessageText = markov.GenerateSequence(r, r.Next(25, 180), !useNGram && !useMovieQuote);
 
                         if(_symSpell != null)
                         {
@@ -207,7 +406,7 @@ namespace Luna
                             }
                         }
 
-                        Console.WriteLine($"{kvp.Key} {(useNGram ? "nGram" : "wordGram")} | {newMessageText}");
+                        Console.WriteLine($"{kvp.Key} {(useMovieQuote ? "quote" : (useNGram ? "nGram" : "wordGram"))} | {newMessageText}");
 
                         if (!string.IsNullOrEmpty(newMessageText))
                         {
@@ -222,18 +421,61 @@ namespace Luna
                     string mimicString = message.Content;
                     foreach (SocketUser u in message.MentionedUsers)
                     {
-                        Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
-                        mimicString = userIDRegex.Replace(mimicString, u.Username);
+                        if (!u.IsBot)
+                        {
+                            Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
+                            mimicString = userIDRegex.Replace(mimicString, u.Username);
+                        }
                     }
                     mimicString = mimicString.Replace("@everyone", "everyone");
                     _ = Task.Run(() => LogMimicData(message.Author.Id, mimicString));
+
+                    Console.WriteLine(GetEmotion(message.Content));
                 }
             }
         }
 
+        private string GetEmotion(string sentence)
+        {
+            string debugResponse = "";
+
+            int emotionCount = 0, hedonometerCount = 0;
+            float nukeyness = 0;
+            WordEmotion totalEmotion = new WordEmotion();
+            HedonometerEntry totalHappiness = new HedonometerEntry();
+            string[] words = sentence.Split(' ');
+            for(int i = 0; i < words.Length; i++)
+            {
+                string word = words[i].ToLower().Trim().Trim('.').Trim('\"').Trim(',').Trim('?').Trim('!');
+                if (andbrainWordDB.TryGetValue(word, out WordEmotion emotion))
+                {
+                    totalEmotion += emotion;
+                    emotionCount++;
+                }
+                if (hedonometerDB.TryGetValue(word, out HedonometerEntry hEntry))
+                {
+                    totalHappiness.happiness += hEntry.happiness;
+                    hedonometerCount++;
+                }
+                if (militaryWordDB.TryGetValue(word, out float value))
+                {
+                    nukeyness += value;
+                }
+            }
+
+            totalEmotion /= emotionCount;
+            totalHappiness.happiness /= hedonometerCount;
+
+            debugResponse += $"happy: {totalEmotion.happiness}, neutral: {totalEmotion.neutral}, surprise: {totalEmotion.surprise}, fear: {totalEmotion.fear}, anger: {totalEmotion.anger}, sadness:{totalEmotion.sadness}";
+            debugResponse += $"\nhedonometer: {totalHappiness.happiness}";
+            debugResponse += $"\ntotal: {emotionCount}, {hedonometerCount}";
+            debugResponse += $"\nnukeyness: {nukeyness}";
+            return debugResponse;
+        }
+
         private void LogMimicData(ulong id, string message)
         {
-            _mutex.WaitOne();
+            _semaphore.WaitOne();
 
             if (!AllUserData.TryGetValue(id, out CustomUserData userData))
             {
@@ -245,7 +487,7 @@ namespace Luna
                 catch (FileNotFoundException e) { }
             }
 
-            _mutex.ReleaseMutex();
+            _semaphore.Release();
 
             if (userData.TrackMe)
             {
@@ -258,7 +500,7 @@ namespace Luna
         public async Task HandleReactionAddedAsync(Cacheable<IUserMessage, ulong> before, ISocketMessageChannel channel, SocketReaction reaction)
         {
             var message = await before.GetOrDownloadAsync();
-            if (message.Author.Id == _client.CurrentUser.Id && message.Content == consentMessage && reaction.UserId != _client.CurrentUser.Id)
+            if (message.Author.Id == _client.CurrentUser.Id && message.Content == CONSENT_MESSAGE && reaction.UserId != _client.CurrentUser.Id)
             {
                 if (!CommandManager._instance.AllUserData.TryGetValue(reaction.UserId, out CustomUserData userData))
                 {

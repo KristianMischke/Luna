@@ -77,7 +77,10 @@ public class MarkovChain
             }
 
             if (checkCount != state.massCount)
-                throw new System.Exception("Number Mismatch: " + checkCount + " != " + state.massCount);
+            {
+                Console.WriteLine($"Number Mismatch: {checkCount} != {state.massCount}\nUpdating total to {checkCount}");
+                state.massCount = checkCount;
+            }
         }
 
         return true;

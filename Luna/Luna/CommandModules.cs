@@ -23,7 +23,7 @@ namespace Luna
 
             if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(userData.wordChain.GenerateSequence(r, r.Next(10, 80), true));
+                await ReplyAsync(userData.wordChain.GenerateSequence(r, r.Next(25, 180), true));
             }
             else
             {
@@ -42,7 +42,7 @@ namespace Luna
 
             if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(userData.nGramChain.GenerateSequence(r, r.Next(10, 80), false));
+                await ReplyAsync(userData.nGramChain.GenerateSequence(r, r.Next(25, 180), false));
             }
             else
             {
