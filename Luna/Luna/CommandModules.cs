@@ -1,5 +1,7 @@
-﻿using Discord.Commands;
+﻿using Discord;
+using Discord.Commands;
 using Discord.WebSocket;
+using Luna.Sentiment;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -50,12 +52,70 @@ namespace Luna
             }
         }
 
+        [Command("topic")]
+        public async Task TopicTalkAsync(string word,
+            [Summary("The (optional) user to mimic")]
+            SocketUser user = null)
+        {
+            var userInfo = user ?? Context.Client.CurrentUser;
+
+            MarkovChain markov = MimicCommandHandler._instance.movieScriptMarkov;
+            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            {
+                markov = userData.wordChain;
+            }
+
+            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180), true);
+            if (string.IsNullOrEmpty(message))
+            {
+                await ReplyAsync($"Oh no, I could not generate with: {word}");
+            }
+            else
+            {
+                await ReplyAsync(message);
+            }
+        }
+
         [Command("saveMimics", true)]
         [Summary("Save me now")]
         public async Task SaveMimicDataAsync()
         {
             MimicCommandHandler._instance.SaveMimicData();
             await ReplyAsync("Saved!");
+        }
+
+        [Command("markMood", true)]
+        [Summary("toggle marking mood")]
+        public async Task StartMarkingMoodAsync()
+        {
+            MimicCommandHandler._instance.markMood = !MimicCommandHandler._instance.markMood;
+            await Context.Message.AddReactionAsync(new Emoji("👍"));
+        }
+
+        [Command("debugMood", true)]
+        [Summary("")]
+        public async Task DebugMoodAsync(SocketUser user)
+        {
+            MoodProfile selectedMood;
+            if (CommandManager._instance.AllUserData.TryGetValue(user.Id, out CustomUserData userData))
+            {
+                selectedMood = userData.mood;
+            }
+            else if (user.Id == CommandManager._instance.ClientID)
+            {
+                selectedMood = MimicCommandHandler._instance.moodProfile;
+            }
+            else
+            {
+                await ReplyAsync($"{user.Username} is not in my system");
+                return;
+            }
+
+            IUserMessage reply = await ReplyAsync($"{selectedMood.ToString()}");
+
+            string primaryMood = selectedMood.GetPrimaryMood();
+            List<IEmote> emotes = MimicCommandHandler._instance.moodEmoji[primaryMood];
+            await reply.AddReactionAsync(emotes[r.Next(emotes.Count)]);
         }
 
         [Command("clearMe", true)]

@@ -33,6 +33,8 @@ namespace Luna
         private Dictionary<ulong, CustomUserData> _allUserData;
         public Dictionary<ulong, CustomUserData> AllUserData { get { return _allUserData; } set { _allUserData = value; } }
 
+        public ulong ClientID => _client.CurrentUser.Id;
+
         // Retrieve client and CommandService instance via ctor
         public CommandManager(DiscordSocketClient client, CommandService commands)
         {

@@ -2,31 +2,37 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Luna.System;
 
 public class MarkovChain
 {
-    class MarkovState
+    public class MarkovState
     {
         public string gram;
         public int massCount;
         public SortedDictionary<string, int> next;
+        public HashSet<string> prev;
 
         public MarkovState(string gram)
         {
             this.gram = gram;
             this.massCount = 0;
             next = new SortedDictionary<string, int>();
+            prev = new HashSet<string>();
         }
     }
 
     MarkovState START_GRAM = new MarkovState("THIS_IS_THE_STARTING_GRAM_BOOP_BEEP_BOOP1349857");
     MarkovState END_GRAM = new MarkovState("THIS_IS_THE_ENDING_GRAM_BOOP_BEEP_BOOP2462256");
+    public string StartGram => START_GRAM.gram;
+    public string EndGram => END_GRAM.gram;
 
     Dictionary<string, MarkovState> states = new Dictionary<string, MarkovState>();
     int order = -1;
+    public int Order => order;
 
     public MarkovChain()
     {
@@ -72,6 +78,10 @@ public class MarkovChain
             JObject jNext = rhs.Property("next").Value as JObject;
             foreach (JProperty next in jNext.Properties())
             {
+                if (!states.TryGetValue(next.Name, out MarkovState nextState))
+                    nextState = states[next.Name] = new MarkovState(next.Name);
+                nextState.prev.Add(state.gram);
+
                 state.next[next.Name] = (int)next.Value;
                 checkCount += (int)next.Value;
             }
@@ -152,6 +162,8 @@ public class MarkovChain
             if (!states.TryGetValue(s, out curr))
                 curr = states[s] = new MarkovState(s);
 
+            curr.prev.Add(prev.gram);
+
             prev.massCount++;
             if (prev.next.ContainsKey(s))
                 prev.next[s]++;
@@ -176,7 +188,7 @@ public class MarkovChain
     /// <param name="weightedRandom"></param>
     /// <param name="tryToComplete"></param>
     /// <returns></returns>
-    public string GetNextGram(string prevGram, System.Random random, bool weightedRandom = true, bool tryToComplete = false, int tryTimes = 4)
+    public string GetNextGram(string prevGram, System.Random random, Func<MarkovState, string> getNext, bool tryToComplete = false, bool goForward = true, int tryTimes = 4)
     {
         MarkovState prev;
         if (!states.TryGetValue(prevGram, out prev))
@@ -188,34 +200,7 @@ public class MarkovChain
         bool satisfied = false;
         while (!satisfied)
         {
-            if (weightedRandom)
-            {
-                int randomChoice = random.Next(0, prev.massCount);
-                int countIncrement = 0;
-                foreach (KeyValuePair<string, int> kvp in prev.next)
-                {
-                    if (randomChoice >= countIncrement && randomChoice <= countIncrement + kvp.Value)
-                    {
-                        nextGram = kvp.Key;
-                        break;
-                    }
-
-                    countIncrement += kvp.Value;
-                }
-            }
-            else
-            {
-                int randomIndex = random.Next(0, prev.next.Count);
-                foreach (string s in prev.next.Keys)
-                {
-                    if (randomIndex == 0)
-                    {
-                        nextGram = s;
-                        break;
-                    }
-                    randomIndex--;
-                }
-            }
+            nextGram = getNext(prev);
 
             if (!tryToComplete)
             {
@@ -224,7 +209,9 @@ public class MarkovChain
             else
             {
                 completeTries++;
-                if (nextGram == END_GRAM.gram || states[nextGram].next.ContainsKey(END_GRAM.gram))
+                if (goForward && (nextGram == END_GRAM.gram || states[nextGram].next.ContainsKey(END_GRAM.gram)))
+                    satisfied = true;
+                else if (!goForward && (nextGram == START_GRAM.gram || states[nextGram].prev.Contains(START_GRAM.gram)))
                     satisfied = true;
                 else
                     satisfied = completeTries >= tryTimes;
@@ -232,6 +219,43 @@ public class MarkovChain
         }
 
         return nextGram;
+    }
+
+    private string GetNextRandomGram(MarkovState curr, Random random, bool weightedRandom = true)
+    {
+        if (weightedRandom)
+        {
+            int randomChoice = random.Next(0, curr.massCount);
+            int countIncrement = 0;
+            foreach (KeyValuePair<string, int> kvp in curr.next)
+            {
+                if (randomChoice >= countIncrement && randomChoice <= countIncrement + kvp.Value)
+                {
+                    return kvp.Key;
+                }
+
+                countIncrement += kvp.Value;
+            }
+        }
+        else
+        {
+            int randomIndex = random.Next(0, curr.next.Count);
+            foreach (string s in curr.next.Keys)
+            {
+                if (randomIndex == 0)
+                {
+                    return s;
+                }
+                randomIndex--;
+            }
+        }
+
+        return null;
+    }
+
+    private string GetPrevRandomGram(MarkovState curr, Random random)
+    {
+        return curr.prev.ElementAt(random.Next(curr.prev.Count));
     }
 
     public string GenerateSequence(System.Random random, int preferredLength, bool insertSpace = false, int maxLength = 1000, bool weightedRandom = true)
@@ -243,7 +267,7 @@ public class MarkovChain
         bool satisfied = false;
         while (!satisfied)
         {
-            gram = GetNextGram(gram, random, weightedRandom, generatedText.Length + (order == -1 ? 0 : order * 3) >= preferredLength);
+            gram = GetNextGram(gram, random, (x) => GetNextRandomGram(x, random, weightedRandom), generatedText.Length + (order == -1 ? 0 : order * 3) >= preferredLength);
 
             if (gram != END_GRAM.gram)
                 generatedText += gram;
@@ -256,5 +280,44 @@ public class MarkovChain
         }
 
         return generatedText;
+    }
+
+    public string GenerateSequenceMiddleOut(string startGram, System.Random random, int preferredLength, bool insertSpace = false, int maxLength = 1000, bool weightedRandom = true)
+    {
+        string generatedText = startGram;
+
+        string backwardGram = startGram;
+        string forwardGram = startGram;
+
+        bool satisfied = false;
+        while (!satisfied)
+        {
+            if (!string.IsNullOrEmpty(backwardGram) && backwardGram != START_GRAM.gram)
+                backwardGram = GetNextGram(backwardGram, random, (x) => GetPrevRandomGram(x, random), generatedText.Length + (order == -1 ? 0 : order * 3) >= preferredLength, false);
+            if (!string.IsNullOrEmpty(forwardGram) && forwardGram != END_GRAM.gram)
+                forwardGram = GetNextGram(forwardGram, random, (x) => GetNextRandomGram(x, random, weightedRandom), generatedText.Length + (order == -1 ? 0 : order * 3) >= preferredLength);
+
+            bool backwardDone = string.IsNullOrEmpty(backwardGram) || backwardGram == START_GRAM.gram;
+            bool forwardDone = string.IsNullOrEmpty(forwardGram) || forwardGram == END_GRAM.gram;
+
+            if (!forwardDone)
+            {
+                if (insertSpace)
+                    generatedText += " ";
+                generatedText += forwardGram;
+            }
+
+            if (!backwardDone)
+            {
+                if (insertSpace)
+                    generatedText = " " + generatedText;
+                generatedText = backwardGram + generatedText;
+            }
+
+            if ((backwardDone && forwardDone) || generatedText.Length > maxLength)
+                satisfied = true;
+        }
+
+        return generatedText == startGram ? null : generatedText;
     }
 }
