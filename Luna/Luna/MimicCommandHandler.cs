@@ -7,6 +7,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using Discord.Rest;
 using Discord.Commands;
 using System.Text.RegularExpressions;
@@ -38,6 +41,7 @@ namespace Luna
         public Dictionary<string, List<IEmote>> moodEmoji = new Dictionary<string, List<IEmote>>();
 
         private readonly DiscordSocketClient _client;
+        private static HttpClient _httpClient = new HttpClient();
 
         private static Semaphore _semaphore = new Semaphore(1, 1);
         private Random r = new Random();
@@ -420,6 +424,7 @@ namespace Luna
             bool iAmMentioned = message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id);
             bool messageContainsLuna = message.Content.ToLowerInvariant().Contains("luna");
             MoodProfile lastMoodProfile = new MoodProfile(moodProfile);
+            string[] messageWords = message.Content.Split(' ');
 
             if (message.Author.Id != _client.CurrentUser.Id
                 && !string.IsNullOrEmpty(message.Content)
@@ -443,9 +448,15 @@ namespace Luna
                 if (messageContainsLuna || r.NextDouble() < 0.2) // add reaction if luna mentioned OR 20%
                 {
                     if (r.NextDouble() < 0.5)
-                        await message.AddReactionAsync(new Emoji(Char.ConvertFromUtf32(r.Next(0x1F600, 0x1F64F))));
+                        await message.AddReactionAsync(new Emoji(char.ConvertFromUtf32(r.Next(0x1F600, 0x1F64F))));
                     else
-                        await message.AddReactionAsync(new Emoji(Char.ConvertFromUtf32(r.Next(0x1F90D, 0x1F978))));
+                        await message.AddReactionAsync(new Emoji(char.ConvertFromUtf32(r.Next(0x1F90D, 0x1F978))));
+                }
+
+                if (lastMoodProfile.GetPrimaryMood() == "nukey" && r.NextDouble() < 0.5)
+                {
+                    var context2 = new SocketCommandContext(_client, message);
+                    await context2.Channel.SendMessageAsync(await GetGIFLink("nuke"));
                 }
                 
                 if (message.Channel is IDMChannel || iAmMentioned || (messageContainsLuna && r.NextDouble() > 0.5))
@@ -456,17 +467,39 @@ namespace Luna
                     {
                         var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
 
-                        bool useMovieQuote = r.NextDouble() > 0.8f;
-                        bool useNGram = r.NextDouble() > 0.65;
+                        bool useMovieQuote = r.NextDouble() < 0.3;
+                        bool useNGram = r.NextDouble() < 0.3;
+                        bool useTopic = r.NextDouble() < 0.5;
+
                         MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
                         if (useMovieQuote)
                             markov = movieScriptMarkov;
+
                         MoodProfile generateMood = moodProfile;
                         if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData) && r.NextDouble() > 0.5)
                         {
                             generateMood = userData.mood;
                         }
-                        string newMessageText = markov.GenerateSequence(moodProfile, r, r.Next(25, 180), (x) => GetMood(x, false), !useNGram && !useMovieQuote);
+
+                        string newMessageText = null;
+                        if (useTopic)
+                        {
+                            string topic = messageWords[r.Next(messageWords.Length)];
+                            if (markov.Order > 0)
+                            {
+                                int rIndex = r.Next(message.Content.Length);
+                                topic = message.Content.Substring(rIndex, markov.Order);
+                            }
+                            newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), !useNGram && !useMovieQuote);
+                            if (string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.3)
+                            {
+                                newMessageText = await GetGIFLink(topic);
+                            }
+                        }
+                        if (string.IsNullOrEmpty(newMessageText))
+                        {
+                            newMessageText = markov.GenerateSequence(moodProfile, r, r.Next(25, 180), (x) => GetMood(x, false), !useNGram && !useMovieQuote);
+                        }
 
                         Console.WriteLine();
                         if(_symSpell != null)
@@ -512,7 +545,7 @@ namespace Luna
 
                     // update moods
                     moodProfile.Mix(messageMood, (float)r.NextDouble());
-                    if (r.NextDouble() < 0.1)
+                    if (r.NextDouble() < 0.05)
                     {
                         moodProfile = moodProfile.Opposite(r.NextDouble() > 0.5);
                     }
@@ -571,8 +604,8 @@ namespace Luna
                     nukeyness += value;
                 }
             }
-
-            totalEmotion.Divide(emotionCount);
+            (string maxEmotion, float maxEmotionValue) = totalEmotion.Max();
+            totalEmotion.Divide(maxEmotionValue);
             totalHappiness.happiness /= hedonometerCount;
 
             MoodProfile result = new MoodProfile() { emotion = totalEmotion, hedonometer = totalHappiness, nukeyness = nukeyness };
@@ -650,6 +683,25 @@ namespace Luna
                     }
                 }
             }
+        }
+
+
+        private async Task<string> GetGIFLink(string searchTerm)
+        {
+            int limit = 10;
+            string url = "https://" + $"api.tenor.com/v1/search?q={searchTerm}&key={Environment.GetEnvironmentVariable("TENOR_GIF_API_KEY", EnvironmentVariableTarget.User)}&limit={limit}";
+
+            HttpResponseMessage response = await _httpClient.GetAsync(url);
+
+            Stream s = await response.Content.ReadAsStreamAsync();
+
+            JObject jObject = await JObject.LoadAsync(new JsonTextReader(new StreamReader(s)));
+            //Console.WriteLine(jObject.ToString());
+
+            JArray results = jObject["results"] as JArray;
+            JObject rand = results[r.Next(results.Count)] as JObject;
+
+            return (string)rand["url"];
         }
     }
 }
