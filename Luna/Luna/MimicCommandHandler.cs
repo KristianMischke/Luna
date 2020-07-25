@@ -313,7 +313,7 @@ namespace Luna
                 else
                 {
                     try { movieScriptMarkov.LoadFromSave(MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE); }
-                    catch (FileNotFoundException e) { }
+                    catch (FileNotFoundException) { }
                     catch (Exception e) { Console.WriteLine($"Path: {MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
             }
@@ -341,7 +341,7 @@ namespace Luna
                     }
 
                     try { playerData.wordChain.LoadFromSave(file); }
-                    catch (FileNotFoundException e) { }
+                    catch (FileNotFoundException) { }
                     catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
                 else if (fileName.StartsWith(CustomUserData.gramMarkovPrefix))
@@ -353,7 +353,7 @@ namespace Luna
                     }
 
                     try { playerData.nGramChain.LoadFromSave(file); }
-                    catch (FileNotFoundException e) { }
+                    catch (FileNotFoundException) { }
                     catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
                 else if (fileName.StartsWith("data_"))
@@ -365,7 +365,7 @@ namespace Luna
                     }
 
                     try { await playerData.LoadDataAsync(file); }
-                    catch (FileNotFoundException e) { }
+                    catch (FileNotFoundException) { }
                     catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
             }
@@ -413,7 +413,7 @@ namespace Luna
                 bool commitAll = bgTaskCancellationToken.Token.IsCancellationRequested;
 
                 if (lonelyMinutes == -1)
-                    lonelyMinutes = r.Next(90, 240);
+                    lonelyMinutes = r.Next(90, 180);
 
                 while (messageEditQueue.Count > 0)
                 {
@@ -497,6 +497,9 @@ namespace Luna
 
                             if (newMessageText != null)
                             {
+                                var otherUsers = guild.Users.Where(x => x.Id != _client.CurrentUser.Id).ToList();
+                                string mentionUser = otherUsers[r.Next(otherUsers.Count)].Mention;
+                                newMessageText = mentionUser + " " + newMessageText;
                                 await channel.SendMessageAsync(newMessageText);
                             }
                             lastMessageTime = DateTimeOffset.UtcNow;
@@ -689,7 +692,7 @@ namespace Luna
                         }
                     }
                     mimicString = mimicString.Replace("@everyone", "everyone");
-                    await Task.Factory.StartNew(() => LogMimicData(message.Author.Id, message.Id, mimicString, message.Timestamp));
+                    _ = Task.Factory.StartNew(() => LogMimicData(message.Author.Id, message.Id, mimicString, message.Timestamp));
                 }
 
                 {
@@ -780,9 +783,9 @@ namespace Luna
                 userData = AllUserData[userID] = new CustomUserData(userID);
 
                 try { userData.wordChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovWordPath); }
-                catch (FileNotFoundException e) { }
+                catch (FileNotFoundException) { }
                 try { userData.nGramChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovGramPath); }
-                catch (FileNotFoundException e) { }
+                catch (FileNotFoundException) { }
             }
 
             _rwSemaphore.Release();

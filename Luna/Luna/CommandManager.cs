@@ -89,16 +89,24 @@ namespace Luna
             // the context of the command, and the result returned from the
             // execution in this event.
 
-            // We can tell the user what went wrong
-            if (!string.IsNullOrEmpty(result?.ErrorReason))
+            try
             {
-                await context.Channel.SendMessageAsync(result.ErrorReason);
+                context.Message.Content.ToCharArray().Distinct().Single();
+                return;
             }
+            catch (InvalidOperationException) // the message contains more than a single kind of character
+            {
+                // We can tell the user what went wrong
+                if (!string.IsNullOrEmpty(result?.ErrorReason))
+                {
+                    await context.Channel.SendMessageAsync(result.ErrorReason);
+                }
 
-            // ...or even log the result (the method used should fit into
-            // your existing log handler)
-            var commandName = command.IsSpecified ? command.Value.Name : "A command";
-            Console.WriteLine($"{commandName} was executed at {DateTime.UtcNow}.");
+                // ...or even log the result (the method used should fit into
+                // your existing log handler)
+                var commandName = command.IsSpecified ? command.Value.Name : "A command";
+                Console.WriteLine($"{commandName} was executed at {DateTime.UtcNow}.");
+            }
         }
 
         private async Task HandleMessageUpdated(Cacheable<IMessage, ulong> before, SocketMessage message, ISocketMessageChannel channel)
