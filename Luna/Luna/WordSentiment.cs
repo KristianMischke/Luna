@@ -414,7 +414,7 @@ namespace Luna.Sentiment
             int index = 0;
             for(int i = 0; i < 10; i++)
             {
-                if (r.NextDouble() > 0.7d && index < sorted.Count-1)
+                if (r.NextDouble() < 0.3 && index < sorted.Count-2)
                 {
                     index++;
                 }

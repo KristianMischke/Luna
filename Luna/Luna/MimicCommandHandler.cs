@@ -34,7 +34,7 @@ namespace Luna
         public Dictionary<string, WordEmotion> textEmotionDB = new Dictionary<string, WordEmotion>();
         public Dictionary<string, HedonometerEntry> hedonometerDB = new Dictionary<string, HedonometerEntry>();
         public Dictionary<string, float> militaryWordDB = new Dictionary<string, float>();
-        public MoodProfile moodProfile = new MoodProfile(); // todo: load/save?
+        public MoodProfile moodProfile = new MoodProfile();
         public bool markMood = false;
 
         public Dictionary<string, List<(string status, ActivityType activity)>> statusByMood = new Dictionary<string, List<(string status, ActivityType activity)>>();
@@ -67,6 +67,8 @@ namespace Luna
         {
             _client = client;
             _instance = this;
+
+            _client.Disconnected += e => Task.Factory.StartNew(SaveMimicData);
         }
 
         public bool GetConsentualUser(ulong id, out CustomUserData userData)
@@ -445,7 +447,13 @@ namespace Luna
                     return;
                 }
 
-                if (messageContainsLuna || r.NextDouble() < 0.2) // add reaction if luna mentioned OR 20%
+                if (message.Content.Contains("<:aokoping:623298389865660425>") || (message.Content.Contains("🏓") && r.NextDouble() > 0.5))
+                {
+                    var context2 = new SocketCommandContext(_client, message);
+                    await context2.Channel.SendMessageAsync("🏓");
+                }
+
+                if (messageContainsLuna || r.NextDouble() < 0.02) // add reaction if luna mentioned OR 2%
                 {
                     if (r.NextDouble() < 0.5)
                         await message.AddReactionAsync(new Emoji(char.ConvertFromUtf32(r.Next(0x1F600, 0x1F64F))));
@@ -537,7 +545,7 @@ namespace Luna
                         }
                     }
                     mimicString = mimicString.Replace("@everyone", "everyone");
-                    _ = Task.Run(() => LogMimicData(message.Author.Id, mimicString));
+                    await Task.Factory.StartNew(() => LogMimicData(message.Author.Id, mimicString));
                 }
 
                 {
@@ -545,9 +553,9 @@ namespace Luna
 
                     // update moods
                     moodProfile.Mix(messageMood, (float)r.NextDouble());
-                    if (r.NextDouble() < 0.05)
+                    if (r.NextDouble() < 0.02)
                     {
-                        moodProfile = moodProfile.Opposite(r.NextDouble() > 0.5);
+                        moodProfile = moodProfile.Opposite(r.NextDouble() < 0.75);
                     }
 
                     if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData))
@@ -688,7 +696,7 @@ namespace Luna
 
         private async Task<string> GetGIFLink(string searchTerm)
         {
-            int limit = 10;
+            int limit = 40;
             string url = "https://" + $"api.tenor.com/v1/search?q={searchTerm}&key={Environment.GetEnvironmentVariable("TENOR_GIF_API_KEY", EnvironmentVariableTarget.User)}&limit={limit}";
 
             HttpResponseMessage response = await _httpClient.GetAsync(url);
@@ -698,10 +706,11 @@ namespace Luna
             JObject jObject = await JObject.LoadAsync(new JsonTextReader(new StreamReader(s)));
             //Console.WriteLine(jObject.ToString());
 
-            JArray results = jObject["results"] as JArray;
-            JObject rand = results[r.Next(results.Count)] as JObject;
+            JArray results = jObject?["results"] as JArray;
+            if (results.Count == 0) return null;
+            JObject rand = results?[r.Next(results.Count)] as JObject;
 
-            return (string)rand["url"];
+            return (string)rand?["url"];
         }
     }
 }
