@@ -17,6 +17,7 @@ namespace Luna
     interface ICustomCommandHandler
     {
         Task SetupAsync();
+        Task HandleMessageUpdated(Cacheable<IMessage, ulong> before, SocketMessage message, ISocketMessageChannel channel);
         Task HandleReactionAddedAsync(Cacheable<IUserMessage, ulong> before, ISocketMessageChannel channel, SocketReaction reaction);
         Task HandleUserMessageAsync(SocketUserMessage message);
         void Cleanup();
@@ -57,11 +58,9 @@ namespace Luna
                 await cmdHandler.SetupAsync();
             }
 
-            // Hook the execution event
             _commands.CommandExecuted += OnCommandExecutedAsync;
-            // Hook the MessageReceived event into our command handler
             _client.MessageReceived += HandleCommandAsync;
-
+            _client.MessageUpdated += HandleMessageUpdated;
             _client.ReactionAdded += HandleReactionAddedAsync;
 
             // Here we discover all of the command modules in the entry 
@@ -100,6 +99,14 @@ namespace Luna
             // your existing log handler)
             var commandName = command.IsSpecified ? command.Value.Name : "A command";
             Console.WriteLine($"{commandName} was executed at {DateTime.UtcNow}.");
+        }
+
+        private async Task HandleMessageUpdated(Cacheable<IMessage, ulong> before, SocketMessage message, ISocketMessageChannel channel)
+        {
+            foreach (ICustomCommandHandler cmdHandler in _commandHandlers)
+            {
+                await cmdHandler.HandleMessageUpdated(before, message, channel);
+            }
         }
 
         private async Task HandleReactionAddedAsync(Cacheable<IUserMessage, ulong> before, ISocketMessageChannel channel, SocketReaction reaction)

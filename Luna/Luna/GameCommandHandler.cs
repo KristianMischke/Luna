@@ -59,6 +59,8 @@ namespace Luna
             
         }
 
+        public async Task HandleMessageUpdated(Cacheable<IMessage, ulong> before, SocketMessage message, ISocketMessageChannel channel) { }
+
         public async Task HandleUserMessageAsync(SocketUserMessage message)
         {
             if (message.Author.Id != _client.CurrentUser.Id

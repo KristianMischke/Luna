@@ -40,10 +40,20 @@ namespace Luna
         public Dictionary<string, List<(string status, ActivityType activity)>> statusByMood = new Dictionary<string, List<(string status, ActivityType activity)>>();
         public Dictionary<string, List<IEmote>> moodEmoji = new Dictionary<string, List<IEmote>>();
 
+        private Dictionary<ulong, string> usernameCache = new Dictionary<ulong, string>();
+        private Dictionary<ulong, (ulong userID, string content, DateTimeOffset? time)> messageCache = new Dictionary<ulong, (ulong userID, string content, DateTimeOffset? time)>();
+        private Queue<(ulong userID, ulong messageID, string content, DateTimeOffset? time)> messageEditQueue = new Queue<(ulong userID, ulong messageID, string content, DateTimeOffset? time)>();
+
+        private CancellationTokenSource bgTaskCancellationToken;
+
         private readonly DiscordSocketClient _client;
         private static HttpClient _httpClient = new HttpClient();
 
-        private static Semaphore _semaphore = new Semaphore(1, 1);
+        private ulong lastGuildID = 0;
+
+        private static Semaphore _rwSemaphore = new Semaphore(1, 1);
+        private static Semaphore _markovSemaphore = new Semaphore(1, 1);
+        private static bool readyToSave = false;
         private Random r = new Random();
 
         public MarkovChain movieScriptMarkov = new MarkovChain();
@@ -68,7 +78,7 @@ namespace Luna
             _client = client;
             _instance = this;
 
-            _client.Disconnected += e => Task.Factory.StartNew(SaveMimicData);
+            _client.Disconnected += e => Task.Factory.StartNew(() => SaveMimicData());
         }
 
         public bool GetConsentualUser(ulong id, out CustomUserData userData)
@@ -83,7 +93,7 @@ namespace Luna
 
         public async Task SetupAsync()
         {
-            _semaphore.WaitOne();
+            _rwSemaphore.WaitOne();
 
             { // load dictionary
                 int initialCapacity = 82765;
@@ -277,6 +287,7 @@ namespace Luna
                 }
             }
 
+            _markovSemaphore.WaitOne();
             { // movie script markov
                 if (!File.Exists(MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE))
                 {
@@ -358,6 +369,7 @@ namespace Luna
                     catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
             }
+            _markovSemaphore.Release();
 
             if (File.Exists(MimicDirectory + "/" + USER_TRACK_FILE))
             {
@@ -379,16 +391,135 @@ namespace Luna
                     } while (line != null);
                 }
             }
-            _semaphore.Release();
+            _rwSemaphore.Release();
+
+            StartBGThread();
+        }
+
+        private void StartBGThread()
+        {
+            readyToSave = false;
+            bgTaskCancellationToken = new CancellationTokenSource();
+            _ = Task.Factory.StartNew(BackgroundUpdate, bgTaskCancellationToken.Token, TaskCreationOptions.LongRunning, TaskScheduler.Current);
+        }
+
+        DateTimeOffset lastMessageTime = DateTimeOffset.UtcNow;
+        int lonelyMinutes = -1;
+        private async Task BackgroundUpdate()
+        {
+            bool done = false;
+            while (!done)
+            {
+                bool commitAll = bgTaskCancellationToken.Token.IsCancellationRequested;
+
+                if (lonelyMinutes == -1)
+                    lonelyMinutes = r.Next(90, 240);
+
+                while (messageEditQueue.Count > 0)
+                {
+                    var nextItem = messageEditQueue.Dequeue();
+                    if (messageCache.TryGetValue(nextItem.messageID, out var beforeItem))
+                    {
+                        //TODO: Luna can respond to edits/diffs here
+                        messageCache[nextItem.messageID] = (nextItem.userID, nextItem.content, nextItem.time);
+                        if (nextItem.time.HasValue && nextItem.time > lastMessageTime)
+                            lastMessageTime = nextItem.time.Value;
+                    }
+                }
+
+                var keys = messageCache.Keys.ToList();
+                var items = messageCache.Values.ToList();
+                for(int i = 0; i < items.Count; i++)
+                {
+                    var item = items[i];
+                    if (commitAll || item.time == null || DateTimeOffset.UtcNow.Subtract(item.time.Value).TotalSeconds > 60)
+                    {
+                        if (AllUserData.TryGetValue(item.userID, out CustomUserData userData) && userData.TrackMe)
+                        {
+                            _markovSemaphore.WaitOne();
+                            //Console.WriteLine($"{item.userID}[{usernameCache[item.userID] ?? ""}] {item.content} [COMMITTED]");
+                            userData.nGramChain.LoadNGrams(item.content, 6);
+                            userData.wordChain.LoadGramsDelimeter(item.content, " ");
+                            _markovSemaphore.Release();
+                            messageCache.Remove(keys[i]);
+                        }
+                    }
+                }
+
+                if (commitAll)
+                {
+                    readyToSave = true;
+                    done = true;
+                }
+
+                if (DateTimeOffset.UtcNow.Subtract(lastMessageTime).Minutes > lonelyMinutes && DateTimeOffset.Now.Hour >= 10 && DateTimeOffset.Now.Hour <= 23 && lastGuildID != 0)
+                {
+                    SocketGuild guild = _client.GetGuild(lastGuildID);
+                    List<SocketTextChannel> channels = guild.TextChannels.ToList<SocketTextChannel>();
+                    if (channels.Count > 0)
+                    {
+                        SocketTextChannel channel = channels[r.Next(channels.Count)];
+
+
+                        string[] lonelyWords = new string[]
+                        {
+                            "lonely",
+                            "empty",
+                            "alone",
+                            "where",
+                            "why",
+                            "hmm",
+                            "gone",
+                            "left",
+                            "sad",
+                            "meaning",
+                            "home",
+                            "friend",
+                            "miss"
+                        };
+
+                        var validUsers = AllUserData.Where(x => x.Value.TrackMe);
+                        if (validUsers.Any())
+                        {
+                            _markovSemaphore.WaitOne();
+                            var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
+
+                            bool useNGram = r.NextDouble() < 0.5;
+
+                            MarkovChain markov = useNGram ? kvp.Value.nGramChain : movieScriptMarkov;
+                            string newMessageText = null;
+                            string topic = lonelyWords[r.Next(lonelyWords.Length)];
+                            newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), !useNGram);
+                            if (string.IsNullOrEmpty(newMessageText))
+                            {
+                                newMessageText = await GetGIFLink(topic);
+                            }
+
+                            if (newMessageText != null)
+                            {
+                                await channel.SendMessageAsync(newMessageText);
+                            }
+                            lastMessageTime = DateTimeOffset.UtcNow;
+                            lonelyMinutes = -1;
+                        }
+                    }
+                }
+
+                Thread.Sleep(1000);
+            }
         }
 
         public void Cleanup()
         {
-            SaveMimicData();
+            SaveMimicData(true);
         }
 
-        public void SaveMimicData()
+        public void SaveMimicData(bool isExit = false)
         {
+            bgTaskCancellationToken.Cancel();
+            while (!readyToSave) Thread.Sleep(100);
+
+            _markovSemaphore.WaitOne();
             movieScriptMarkov.Save(MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE);
 
             using (StreamWriter writer = new StreamWriter(MimicDirectory + "/bot_data.json"))
@@ -408,6 +539,7 @@ namespace Luna
                 kvp.Value.nGramChain.Save(MimicDirectory + "/" + kvp.Value.MarkovGramPath);
                 kvp.Value.SaveData(MimicDirectory + "/data_" + kvp.Key + ".json");
             }
+            _markovSemaphore.Release();
 
             using (StreamWriter sw = new StreamWriter(MimicDirectory + "/" + USER_TRACK_FILE))
             {
@@ -419,6 +551,9 @@ namespace Luna
                     }
                 }
             }
+
+            if(!isExit)
+                StartBGThread();
         }
 
         public async Task HandleUserMessageAsync(SocketUserMessage message)
@@ -427,6 +562,9 @@ namespace Luna
             bool messageContainsLuna = message.Content.ToLowerInvariant().Contains("luna");
             MoodProfile lastMoodProfile = new MoodProfile(moodProfile);
             string[] messageWords = message.Content.Split(' ');
+
+            var messageContext= new SocketCommandContext(_client, message);
+            lastGuildID = messageContext.Guild.Id;
 
             if (message.Author.Id != _client.CurrentUser.Id
                 && !string.IsNullOrEmpty(message.Content)
@@ -464,6 +602,8 @@ namespace Luna
                 if (lastMoodProfile.GetPrimaryMood() == "nukey" && r.NextDouble() < 0.5)
                 {
                     var context2 = new SocketCommandContext(_client, message);
+                    if(r.NextDouble() < 0.05)
+                        await context2.Channel.SendMessageAsync(await GetGIFLink("hacking"));
                     await context2.Channel.SendMessageAsync(await GetGIFLink("nuke"));
                 }
                 
@@ -473,6 +613,7 @@ namespace Luna
 
                     if (validUsers.Any())
                     {
+                        _markovSemaphore.WaitOne();
                         var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
 
                         bool useMovieQuote = r.NextDouble() < 0.3;
@@ -499,7 +640,7 @@ namespace Luna
                                 topic = message.Content.Substring(rIndex, markov.Order);
                             }
                             newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), !useNGram && !useMovieQuote);
-                            if (string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.3)
+                            if (string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.35)
                             {
                                 newMessageText = await GetGIFLink(topic);
                             }
@@ -530,14 +671,17 @@ namespace Luna
                             await context2.Channel.SendMessageAsync(newMessageText);
                         }
                         Console.WriteLine();
+                        _markovSemaphore.Release();
                     }
                 }
 
+                usernameCache[message.Author.Id] = message.Author.Username;
                 if (!iAmMentioned || message.Content.Trim().Split(' ').Length > 1) // don't record in mimic data if text is only the bot's mention
                 {
                     string mimicString = message.Content;
                     foreach (SocketUser u in message.MentionedUsers)
                     {
+                        usernameCache[u.Id] = u.Username;
                         if (!u.IsBot)
                         {
                             Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
@@ -545,7 +689,7 @@ namespace Luna
                         }
                     }
                     mimicString = mimicString.Replace("@everyone", "everyone");
-                    await Task.Factory.StartNew(() => LogMimicData(message.Author.Id, mimicString));
+                    await Task.Factory.StartNew(() => LogMimicData(message.Author.Id, message.Id, mimicString, message.Timestamp));
                 }
 
                 {
@@ -626,13 +770,14 @@ namespace Luna
             return result;
         }
 
-        private void LogMimicData(ulong id, string message)
+        private void LogMimicData(ulong userID, ulong messageID, string message, DateTimeOffset? time)
         {
-            _semaphore.WaitOne();
+            _markovSemaphore.WaitOne();
+            _rwSemaphore.WaitOne();
 
-            if (!AllUserData.TryGetValue(id, out CustomUserData userData))
+            if (!AllUserData.TryGetValue(userID, out CustomUserData userData))
             {
-                userData = AllUserData[id] = new CustomUserData(id);
+                userData = AllUserData[userID] = new CustomUserData(userID);
 
                 try { userData.wordChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovWordPath); }
                 catch (FileNotFoundException e) { }
@@ -640,13 +785,23 @@ namespace Luna
                 catch (FileNotFoundException e) { }
             }
 
-            _semaphore.Release();
+            _rwSemaphore.Release();
 
             if (userData.TrackMe)
             {
-                Console.WriteLine($"{id} {message}");
-                userData.nGramChain.LoadNGrams(message, 6);
-                userData.wordChain.LoadGramsDelimeter(message, " ");
+                messageCache.Add(messageID, (userID, message, time));
+                Console.WriteLine($"{userID}[{usernameCache[userID] ?? ""}] {message}");
+            }
+            _markovSemaphore.Release();
+        }
+
+        public async Task HandleMessageUpdated(Cacheable<IMessage, ulong> before, SocketMessage message, ISocketMessageChannel channel)
+        {
+            if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData) && userData.TrackMe)
+            {
+                messageEditQueue.Enqueue((message.Author.Id, message.Id, message.Content, message.EditedTimestamp));
+                usernameCache.TryGetValue(message.Author.Id, out string username);
+                Console.WriteLine($"{message.Author.Id}[{username ?? ""}] {message.Content} [EDITED]");
             }
         }
 
