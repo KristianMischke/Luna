@@ -3,6 +3,7 @@ using Discord.WebSocket;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +40,7 @@ namespace Luna
 
         public Dictionary<string, List<(string status, ActivityType activity)>> statusByMood = new Dictionary<string, List<(string status, ActivityType activity)>>();
         public Dictionary<string, List<IEmote>> moodEmoji = new Dictionary<string, List<IEmote>>();
+        public List<string> errorMessages = new List<string>();
 
         private Dictionary<ulong, string> usernameCache = new Dictionary<ulong, string>();
         private Dictionary<ulong, (ulong userID, string content, DateTimeOffset? time)> messageCache = new Dictionary<ulong, (ulong userID, string content, DateTimeOffset? time)>();
@@ -94,6 +96,18 @@ namespace Luna
         public async Task SetupAsync()
         {
             _rwSemaphore.WaitOne();
+
+            {
+                using (StreamReader sr = new StreamReader(MimicDirectory + "/error_messages.txt"))
+                {
+                    string line;
+                    do
+                    {
+                        line = await sr.ReadLineAsync();
+                        errorMessages.Add(line);
+                    } while (line != null);
+                }
+            }
 
             { // load dictionary
                 int initialCapacity = 82765;
@@ -404,6 +418,7 @@ namespace Luna
         }
 
         DateTimeOffset lastMessageTime = DateTimeOffset.UtcNow;
+        DateTimeOffset? myLastMessageTime = null;
         int lonelyMinutes = -1;
         private async Task BackgroundUpdate()
         {
@@ -561,170 +576,267 @@ namespace Luna
 
         public async Task HandleUserMessageAsync(SocketUserMessage message)
         {
-            bool iAmMentioned = message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id);
-            bool messageContainsLuna = message.Content.ToLowerInvariant().Contains("luna");
-            MoodProfile lastMoodProfile = new MoodProfile(moodProfile);
-            string[] messageWords = message.Content.Split(' ');
-
-            var messageContext= new SocketCommandContext(_client, message);
-            lastGuildID = messageContext.Guild.Id;
-
-            if (message.Author.Id != _client.CurrentUser.Id
-                && !string.IsNullOrEmpty(message.Content)
-                && !message.Content.StartsWith('~')
-                && !message.Content.StartsWith('!')
-                && !message.Content.StartsWith('#')
-                && (!message.Content.StartsWith('?') || message.Content.StartsWith("?roll")))
+            try
             {
-                if (message.Content.Contains("say hello", StringComparison.OrdinalIgnoreCase) && iAmMentioned)
-                {
-                    var context2 = new SocketCommandContext(_client, message);
-                    RestUserMessage rm = await context2.Channel.SendMessageAsync(CONSENT_MESSAGE);
+                bool iAmMentioned = message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id);
+                bool messageContainsLuna = message.Content.ToLowerInvariant().Contains("luna");
+                MoodProfile lastMoodProfile = new MoodProfile(moodProfile);
+                double secondsSinceMyLastMessage = myLastMessageTime.HasValue
+                    ? DateTimeOffset.UtcNow.Subtract(myLastMessageTime.Value).TotalSeconds
+                    : double.MaxValue;
 
-                    var checkEmoji = new Emoji("\u2705"); //✅
-                    var exEmoji = new Emoji("\u274C"); //❌
-                    await rm.AddReactionAsync(checkEmoji);
-                    await rm.AddReactionAsync(exEmoji);
+                var messageContext = new SocketCommandContext(_client, message);
+                if (messageContext.Guild != null)
+                    lastGuildID = messageContext.Guild.Id;
+
+                string[] words = message.Content.Split(' ');
+
+                if ((iAmMentioned || messageContainsLuna)
+                    && message.Content.ToLowerInvariant().Contains("join")
+                    && (words.Length == 2 || words.Length == 3)
+                )
+                {
+                    var context = new SocketCommandContext(_client, message);
+
+                    // Get the audio channel
+                    var channel = message.MentionedChannels.Any()
+                        ? message.MentionedChannels.First() as IAudioChannel
+                        : null;
+                    channel = channel ?? (message.Author as IGuildUser)?.VoiceChannel;
+                    if (channel == null)
+                    {
+                        await context.Channel.SendMessageAsync(
+                            "User must be in a voice channel, or a voice channel must be passed as an argument.");
+                        return;
+                    }
+
+                    // For the next step with transmitting audio, you would want to pass this Audio Client in to a service.
+                    _ = Task.Factory.StartNew(async () =>
+                    {
+                        var audioClient = await channel.ConnectAsync();
+                        VoiceChannelCommandHandler._instance.OnJoinChannel(audioClient, channel);
+                    });
+
                     return;
                 }
 
-                if (message.Content.Contains("<:aokoping:623298389865660425>") || (message.Content.Contains("🏓") && r.NextDouble() > 0.5))
+                if ((iAmMentioned || messageContainsLuna)
+                    && message.Content.ToLowerInvariant().Contains("stop")
+                    && (words.Length == 2)
+                )
                 {
-                    var context2 = new SocketCommandContext(_client, message);
-                    await context2.Channel.SendMessageAsync("🏓");
+                    myLastMessageTime = null;
+                    await message.AddReactionAsync(new Emoji("👍"));
+                    return;
                 }
 
-                if (messageContainsLuna || r.NextDouble() < 0.02) // add reaction if luna mentioned OR 2%
+                if (message.Author.Id != _client.CurrentUser.Id
+                    && !string.IsNullOrEmpty(message.Content)
+                    && !message.Content.StartsWith('~')
+                    && !message.Content.StartsWith('!')
+                    && !message.Content.StartsWith('#')
+                    && (!message.Content.StartsWith('?') || message.Content.StartsWith("?roll")))
                 {
-                    if (r.NextDouble() < 0.5)
-                        await message.AddReactionAsync(new Emoji(char.ConvertFromUtf32(r.Next(0x1F600, 0x1F64F))));
-                    else
-                        await message.AddReactionAsync(new Emoji(char.ConvertFromUtf32(r.Next(0x1F90D, 0x1F978))));
-                }
-
-                if (lastMoodProfile.GetPrimaryMood() == "nukey" && r.NextDouble() < 0.5)
-                {
-                    var context2 = new SocketCommandContext(_client, message);
-                    if(r.NextDouble() < 0.05)
-                        await context2.Channel.SendMessageAsync(await GetGIFLink("hacking"));
-                    await context2.Channel.SendMessageAsync(await GetGIFLink("nuke"));
-                }
-                
-                if (message.Channel is IDMChannel || iAmMentioned || (messageContainsLuna && r.NextDouble() > 0.5))
-                {
-                    var validUsers = AllUserData.Where(x => x.Value.TrackMe);
-
-                    if (validUsers.Any())
+                    if (message.Content.ToLowerInvariant().Contains("say hello") && iAmMentioned)
                     {
-                        _markovSemaphore.WaitOne();
-                        var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
+                        var context2 = new SocketCommandContext(_client, message);
+                        RestUserMessage rm = await context2.Channel.SendMessageAsync(CONSENT_MESSAGE);
 
-                        bool useMovieQuote = r.NextDouble() < 0.3;
-                        bool useNGram = r.NextDouble() < 0.3;
-                        bool useTopic = r.NextDouble() < 0.5;
+                        var checkEmoji = new Emoji("\u2705"); //✅
+                        var exEmoji = new Emoji("\u274C"); //❌
+                        await rm.AddReactionAsync(checkEmoji);
+                        await rm.AddReactionAsync(exEmoji);
+                        return;
+                    }
 
-                        MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
-                        if (useMovieQuote)
-                            markov = movieScriptMarkov;
+                    // Dad Joke
+                    Regex imDadRegex = new Regex(@"^(i'?m|i am) (?<predicate>(\w+( \w+)?))$");
+                    Match dadMatch = imDadRegex.Match(message.Content.ToLowerInvariant());
+                    if (dadMatch.Success && dadMatch.Groups["predicate"].Success && r.NextDouble() < 0.8)
+                    {
+                        string predicate = message.Content.Substring(dadMatch.Groups["predicate"].Index,
+                            dadMatch.Groups["predicate"].Length);
 
-                        MoodProfile generateMood = moodProfile;
-                        if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData) && r.NextDouble() > 0.5)
-                        {
-                            generateMood = userData.mood;
-                        }
+                        var context = new SocketCommandContext(_client, message);
+                        await context.Channel.SendMessageAsync($"Hi {predicate}, I'm Luna");
+                    }
 
-                        string newMessageText = null;
-                        if (useTopic)
-                        {
-                            string topic = messageWords[r.Next(messageWords.Length)];
-                            if (markov.Order > 0)
-                            {
-                                int rIndex = r.Next(message.Content.Length);
-                                topic = message.Content.Substring(rIndex, markov.Order);
-                            }
-                            newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), !useNGram && !useMovieQuote);
-                            if (string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.35)
-                            {
-                                newMessageText = await GetGIFLink(topic);
-                            }
-                        }
-                        if (string.IsNullOrEmpty(newMessageText))
-                        {
-                            newMessageText = markov.GenerateSequence(moodProfile, r, r.Next(25, 180), (x) => GetMood(x, false), !useNGram && !useMovieQuote);
-                        }
+                    if (message.Content.Contains("<:aokoping:623298389865660425>") ||
+                        (message.Content.Contains("🏓") && r.NextDouble() > 0.5))
+                    {
+                        var context2 = new SocketCommandContext(_client, message);
+                        await context2.Channel.SendMessageAsync("🏓");
+                    }
 
-                        Console.WriteLine();
-                        if(_symSpell != null)
-                        {
-                            List<SymSpell.SuggestItem> suggestions = _symSpell.LookupCompound(newMessageText, 2);
-                            foreach(SymSpell.SuggestItem s in suggestions)
-                            {
-                                Console.WriteLine($"{s.term} | {s.distance} | {s.count}");
-                            }
-                        }
+                    if (messageContainsLuna || r.NextDouble() < 0.02) // add reaction if luna mentioned OR 2%
+                    {
+                        if (r.NextDouble() < 0.5)
+                            await message.AddReactionAsync(new Emoji(char.ConvertFromUtf32(r.Next(0x1F600, 0x1F64F))));
+                        else
+                            await message.AddReactionAsync(new Emoji(char.ConvertFromUtf32(r.Next(0x1F90D, 0x1F978))));
+                    }
 
-                        Console.WriteLine($"{(useMovieQuote ? "" : kvp.Key.ToString())} {(useMovieQuote ? "quote" : (useNGram ? "nGram" : "wordGram"))} | {newMessageText}");
+                    if (lastMoodProfile.GetPrimaryMood() == "nukey" && r.NextDouble() < 0.5)
+                    {
+                        var context2 = new SocketCommandContext(_client, message);
+                        if (r.NextDouble() < 0.05)
+                            await context2.Channel.SendMessageAsync(await GetGIFLink("hacking"));
+                        await context2.Channel.SendMessageAsync(await GetGIFLink("nuke"));
+                    }
+
+                    if (message.Channel is IDMChannel
+                        || iAmMentioned
+                        || (messageContainsLuna && r.NextDouble() < 0.5)
+                        || (secondsSinceMyLastMessage > r.NextDouble() * 3 && secondsSinceMyLastMessage < r.Next(30) &&
+                            r.NextDouble() < 0.75)
+                    )
+                    {
+                        string newMessageText = await GetMimicMessage(message);
 
                         if (!string.IsNullOrEmpty(newMessageText))
                         {
                             MoodProfile newMessageMood = GetMood(newMessageText, true);
-                            moodProfile.Mix(newMessageMood, (float)r.NextDouble());
+                            moodProfile.Mix(newMessageMood, (float) r.NextDouble());
 
                             var context2 = new SocketCommandContext(_client, message);
                             await context2.Channel.SendMessageAsync(newMessageText);
-                        }
-                        Console.WriteLine();
-                        _markovSemaphore.Release();
-                    }
-                }
 
-                usernameCache[message.Author.Id] = message.Author.Username;
-                if (!iAmMentioned || message.Content.Trim().Split(' ').Length > 1) // don't record in mimic data if text is only the bot's mention
-                {
-                    string mimicString = message.Content;
-                    foreach (SocketUser u in message.MentionedUsers)
+                            myLastMessageTime = DateTimeOffset.UtcNow;
+                        }
+                    }
+
+                    usernameCache[message.Author.Id] = message.Author.Username;
+                    if (!iAmMentioned || message.Content.Trim().Split(' ').Length > 1
+                    ) // don't record in mimic data if text is only the bot's mention
                     {
-                        usernameCache[u.Id] = u.Username;
-                        if (!u.IsBot)
+                        string mimicString = message.Content;
+                        foreach (SocketUser u in message.MentionedUsers)
                         {
-                            Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
-                            mimicString = userIDRegex.Replace(mimicString, u.Username);
+                            usernameCache[u.Id] = u.Username;
+                            if (!u.IsBot)
+                            {
+                                Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
+                                mimicString = userIDRegex.Replace(mimicString, u.Username);
+                            }
                         }
-                    }
-                    mimicString = mimicString.Replace("@everyone", "everyone");
-                    _ = Task.Factory.StartNew(() => LogMimicData(message.Author.Id, message.Id, mimicString, message.Timestamp));
-                }
 
-                {
-                    MoodProfile messageMood = GetMood(message.Content, true);
-
-                    // update moods
-                    moodProfile.Mix(messageMood, (float)r.NextDouble());
-                    if (r.NextDouble() < 0.02)
-                    {
-                        moodProfile = moodProfile.Opposite(r.NextDouble() < 0.75);
+                        mimicString = mimicString.Replace("@everyone", "everyone");
+                        _ = Task.Factory.StartNew(() =>
+                            LogMimicData(message.Author.Id, message.Id, mimicString, message.Timestamp));
                     }
 
-                    if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData))
                     {
-                        userData.mood.Mix(messageMood, (float)r.NextDouble());
-                    }
-                    
-                    string newMood = moodProfile.GetPrimaryMood();
-                    if (newMood != lastMoodProfile.GetPrimaryMood() && statusByMood.TryGetValue(newMood, out List<(string status, ActivityType activity)> statuses))
-                    {
-                        Console.WriteLine("New Mood: " + newMood);
-                        var newStatus = statuses[r.Next(statuses.Count)];
+                        MoodProfile messageMood = GetMood(message.Content, true);
 
-                        await _client.SetGameAsync(newStatus.status, null, newStatus.activity);
-                    }
+                        // update moods
+                        moodProfile.Mix(messageMood, (float) r.NextDouble());
+                        if (r.NextDouble() < 0.02)
+                        {
+                            moodProfile = moodProfile.Opposite(r.NextDouble() < 0.75);
+                        }
 
-                    if (markMood && moodEmoji.TryGetValue(messageMood.GetPrimaryMood(), out List<IEmote> emoji))
-                    {
-                        await message.AddReactionAsync(emoji[r.Next(emoji.Count)]);
+                        if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData))
+                        {
+                            userData.mood.Mix(messageMood, (float) r.NextDouble());
+                        }
+
+                        string newMood = moodProfile.GetPrimaryMood();
+                        if (newMood != lastMoodProfile.GetPrimaryMood() && statusByMood.TryGetValue(newMood,
+                            out List<(string status, ActivityType activity)> statuses))
+                        {
+                            Console.WriteLine("New Mood: " + newMood);
+                            var newStatus = statuses[r.Next(statuses.Count)];
+
+                            await _client.SetGameAsync(newStatus.status, null, newStatus.activity);
+                        }
+
+                        if (markMood && moodEmoji.TryGetValue(messageMood.GetPrimaryMood(), out List<IEmote> emoji))
+                        {
+                            await message.AddReactionAsync(emoji[r.Next(emoji.Count)]);
+                        }
                     }
                 }
             }
+            catch (Exception e)
+            {
+                var err_context = new SocketCommandContext(_client, message);
+                if (r.NextDouble() < 0.2)
+                {
+                    await err_context.Channel.SendMessageAsync(await GetGIFLink("error"));
+                }
+                else
+                {
+                    await err_context.Channel.SendMessageAsync(errorMessages[r.Next(errorMessages.Count)]);
+                }
+
+                string err_msg = e.ToString();
+                await err_context.Channel.SendMessageAsync(err_msg.Substring(0, Math.Min(1000, err_msg.Length)));
+            }
+        }
+
+        public async Task<string> GetMimicMessage(SocketUserMessage message, bool allowGIF = true, bool logToConsole = true)
+        {
+            string newMessageText = null;
+
+            string[] messageWords = message?.Content?.Split(' ');
+            var validUsers = AllUserData.Where(x => x.Value.TrackMe);
+
+            if (validUsers.Any())
+            {
+                _markovSemaphore.WaitOne();
+                var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
+
+                bool useMovieQuote = r.NextDouble() < 0.3;
+                bool useNGram = r.NextDouble() < 0.3;
+                bool useTopic = r.NextDouble() < 0.5;
+
+                MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
+                if (useMovieQuote)
+                    markov = movieScriptMarkov;
+
+                MoodProfile generateMood = moodProfile;
+                if (message != null && AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData) && r.NextDouble() < 0.5)
+                {
+                    generateMood = userData.mood;
+                }
+
+                if (useTopic && message != null && messageWords != null && messageWords.Length > 0)
+                {
+                    string topic = messageWords[r.Next(messageWords.Length)];
+                    if (markov.Order > 0 && markov.Order < message.Content.Length)
+                    {
+                        int rIndex = r.Next(message.Content.Length - markov.Order);
+                        topic = message.Content.Substring(rIndex, markov.Order);
+                    }
+                    newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), !useNGram && !useMovieQuote);
+                    if (allowGIF && string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.35)
+                    {
+                        newMessageText = await GetGIFLink(topic);
+                    }
+                }
+                if (string.IsNullOrEmpty(newMessageText))
+                {
+                    newMessageText = markov.GenerateSequence(moodProfile, r, r.Next(25, 180), (x) => GetMood(x, false), !useNGram && !useMovieQuote);
+                }
+
+                if (logToConsole)
+                {
+                    Console.WriteLine();
+                    if (_symSpell != null)
+                    {
+                        List<SymSpell.SuggestItem> suggestions = _symSpell.LookupCompound(newMessageText, 2);
+                        foreach (SymSpell.SuggestItem s in suggestions)
+                        {
+                            Console.WriteLine($"{s.term} | {s.distance} | {s.count}");
+                        }
+                    }
+                    Console.WriteLine($"{(useMovieQuote ? "" : kvp.Key.ToString() + $"[{usernameCache.GetValueOrDefault(kvp.Key, "")}]")} {(useMovieQuote ? "quote" : (useNGram ? "nGram" : "wordGram"))} | {newMessageText}");
+                    Console.WriteLine();
+                }
+                _markovSemaphore.Release();
+            }
+
+            return newMessageText;
         }
 
         private MoodProfile GetMood(string sentence, bool debug)
@@ -793,7 +905,7 @@ namespace Luna
             if (userData.TrackMe)
             {
                 messageCache.Add(messageID, (userID, message, time));
-                Console.WriteLine($"{userID}[{usernameCache[userID] ?? ""}] {message}");
+                Console.WriteLine($"{userID}[{usernameCache[userID]}] {message}");
             }
             _markovSemaphore.Release();
         }

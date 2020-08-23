@@ -11,6 +11,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="System.Speech">
+      <HintPath>..\..\..\..\..\..\..\Program Files\Reference Assemblies\Microsoft\Framework\v3.0\System.Speech.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Update="C:\Users\krist\.nuget\packages\symspell\6.5.0\contentFiles\any\netstandard2.0\frequency_bigramdictionary_en_243_342.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>

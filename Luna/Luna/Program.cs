@@ -49,6 +49,7 @@ namespace Luna
             _commandHandler = new CommandManager(_client, _commandService);
             _commandHandler.AddCustomCommandHandler(new MimicCommandHandler(_client));
             _commandHandler.AddCustomCommandHandler(new GameCommandHandler(_client));
+            _commandHandler.AddCustomCommandHandler(new VoiceChannelCommandHandler(_client));
             await _commandHandler.SetupAsync();
 
             // Some biolerplate to react to close window event

@@ -420,6 +420,12 @@ namespace Luna.Sentiment
                 }
             }
 
+            if (sorted.Values.Count == 0)
+            {
+                Console.WriteLine("[WordSentiment] Values.Count == 0");
+                Console.WriteLine($"prev = {prev.gram}");
+            }
+
             return sorted.Values[index];
         }
     }
