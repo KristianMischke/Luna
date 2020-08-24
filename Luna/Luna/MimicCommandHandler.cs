@@ -370,6 +370,18 @@ namespace Luna
                     catch (FileNotFoundException) { }
                     catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
+                else if (fileName.StartsWith(CustomUserData.doubleWordMarkovPrefix))
+                {
+                    ulong id = ulong.Parse(fileName.Substring(CustomUserData.doubleWordMarkovPrefix.Length));
+                    if (!AllUserData.TryGetValue(id, out CustomUserData playerData))
+                    {
+                        playerData = AllUserData[id] = new CustomUserData(id);
+                    }
+
+                    try { playerData.doubleWordChain.LoadFromSave(file); }
+                    catch (FileNotFoundException) { }
+                    catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
+                }
                 else if (fileName.StartsWith("data_"))
                 {
                     ulong id = ulong.Parse(fileName.Substring("data_".Length));
@@ -455,6 +467,7 @@ namespace Luna
                             //Console.WriteLine($"{item.userID}[{usernameCache[item.userID] ?? ""}] {item.content} [COMMITTED]");
                             userData.nGramChain.LoadNGrams(item.content, 6);
                             userData.wordChain.LoadGramsDelimeter(item.content, " ");
+                            userData.doubleWordChain.LoadGramsDelimeter(item.content, " ", together:2);
                             _markovSemaphore.Release();
                             messageCache.Remove(keys[i]);
                         }
@@ -555,6 +568,7 @@ namespace Luna
             {
                 kvp.Value.wordChain.Save(MimicDirectory + "/" + kvp.Value.MarkovWordPath);
                 kvp.Value.nGramChain.Save(MimicDirectory + "/" + kvp.Value.MarkovGramPath);
+                kvp.Value.doubleWordChain.Save(MimicDirectory + "/" + kvp.Value.MarkovDoubleWordPath);
                 kvp.Value.SaveData(MimicDirectory + "/data_" + kvp.Key + ".json");
             }
             _markovSemaphore.Release();
@@ -695,13 +709,18 @@ namespace Luna
 
                         if (!string.IsNullOrEmpty(newMessageText))
                         {
-                            MoodProfile newMessageMood = GetMood(newMessageText, true);
-                            moodProfile.Mix(newMessageMood, (float) r.NextDouble());
+                            double threshold = 0;
+                            do
+                            {
+                                MoodProfile newMessageMood = GetMood(newMessageText, true);
+                                moodProfile.Mix(newMessageMood, (float) r.NextDouble());
 
-                            var context2 = new SocketCommandContext(_client, message);
-                            await context2.Channel.SendMessageAsync(newMessageText);
+                                var context2 = new SocketCommandContext(_client, message);
+                                await context2.Channel.SendMessageAsync(newMessageText);
 
-                            myLastMessageTime = DateTimeOffset.UtcNow;
+                                myLastMessageTime = DateTimeOffset.UtcNow;
+                                threshold += r.NextDouble();
+                            } while (threshold < 0.10);
                         }
                     }
 
@@ -732,7 +751,7 @@ namespace Luna
                         moodProfile.Mix(messageMood, (float) r.NextDouble());
                         if (r.NextDouble() < 0.02)
                         {
-                            moodProfile = moodProfile.Opposite(r.NextDouble() < 0.75);
+                            moodProfile = moodProfile.Opposite(r.NextDouble() < 0.85);
                         }
 
                         if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData))
@@ -788,9 +807,14 @@ namespace Luna
 
                 bool useMovieQuote = r.NextDouble() < 0.3;
                 bool useNGram = r.NextDouble() < 0.3;
+                bool useDouble = r.NextDouble() < 0.3;
                 bool useTopic = r.NextDouble() < 0.5;
 
+                bool insertSpaces = !useNGram && !useMovieQuote;
+
                 MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
+                if (useDouble)
+                    markov = kvp.Value.doubleWordChain;
                 if (useMovieQuote)
                     markov = movieScriptMarkov;
 
@@ -808,7 +832,7 @@ namespace Luna
                         int rIndex = r.Next(message.Content.Length - markov.Order);
                         topic = message.Content.Substring(rIndex, markov.Order);
                     }
-                    newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), !useNGram && !useMovieQuote);
+                    newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), insertSpaces);
                     if (allowGIF && string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.35)
                     {
                         newMessageText = await GetGIFLink(topic);
@@ -816,7 +840,7 @@ namespace Luna
                 }
                 if (string.IsNullOrEmpty(newMessageText))
                 {
-                    newMessageText = markov.GenerateSequence(moodProfile, r, r.Next(25, 180), (x) => GetMood(x, false), !useNGram && !useMovieQuote);
+                    newMessageText = markov.GenerateSequence(generateMood, r, r.Next(25, 180), (x) => GetMood(x, false), insertSpaces);
                 }
 
                 if (logToConsole)
@@ -830,7 +854,9 @@ namespace Luna
                             Console.WriteLine($"{s.term} | {s.distance} | {s.count}");
                         }
                     }
-                    Console.WriteLine($"{(useMovieQuote ? "" : kvp.Key.ToString() + $"[{usernameCache.GetValueOrDefault(kvp.Key, "")}]")} {(useMovieQuote ? "quote" : (useNGram ? "nGram" : "wordGram"))} | {newMessageText}");
+
+                    string msgType = (useMovieQuote ? "quote" : (useDouble ? "doubleWord" : (useNGram ? "nGram" : "wordGram")));
+                    Console.WriteLine($"{(useMovieQuote ? "" : kvp.Key.ToString() + $"[{usernameCache.GetValueOrDefault(kvp.Key, "")}]")} {msgType} | {newMessageText}");
                     Console.WriteLine();
                 }
                 _markovSemaphore.Release();
@@ -897,6 +923,8 @@ namespace Luna
                 try { userData.wordChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovWordPath); }
                 catch (FileNotFoundException) { }
                 try { userData.nGramChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovGramPath); }
+                catch (FileNotFoundException) { }
+                try { userData.doubleWordChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovDoubleWordPath); }
                 catch (FileNotFoundException) { }
             }
 

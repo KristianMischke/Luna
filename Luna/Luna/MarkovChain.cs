@@ -124,14 +124,33 @@ public class MarkovChain
         }
     }
 
-    public void LoadGramsDelimeter(string text, string delimiter)
+    public void LoadGramsDelimeter(string text, string delimiter, int together = 1)
     {
         List<string> grams = new List<string>();
         if (string.IsNullOrEmpty(delimiter))
+        {
             grams.Add(text);
+        }
         else
+        {
+            int groupCount = 0;
+            string combined = "";
             foreach (string s in text.Split(delimiter.ToCharArray(), System.StringSplitOptions.RemoveEmptyEntries))
-                grams.Add(s);
+            {
+                groupCount++;
+                if (groupCount == together)
+                {
+                    combined += s;
+                    grams.Add(combined);
+                    combined = "";
+                    groupCount = 0;
+                }
+                else
+                {
+                    combined += s + delimiter;
+                }
+            }
+        }
 
         LoadGrams(grams);
     }

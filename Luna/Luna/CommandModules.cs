@@ -52,6 +52,25 @@ namespace Luna
             }
         }
 
+        [Command("mimic3")]
+        [Summary("Mimicry is the best form of flattery")]
+        //[Alias("user", "whois")]
+        public async Task Mimic3UserAsync(
+            [Summary("The (optional) user to mimic")]
+            SocketUser user = null)
+        {
+            var userInfo = user ?? Context.Client.CurrentUser;
+
+            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            {
+                await ReplyAsync(userData.doubleWordChain.GenerateSequence(r, r.Next(25, 180), true));
+            }
+            else
+            {
+                await ReplyAsync($"Oh no, I could not mimic {user?.Username ?? "them"}");
+            }
+        }
+
         [Command("topic")]
         public async Task TopicTalkAsync(string word,
             [Summary("The (optional) user to mimic")]
@@ -126,6 +145,7 @@ namespace Luna
             {
                 userData.nGramChain.ClearData();
                 userData.wordChain.ClearData();
+                userData.doubleWordChain.ClearData();
                 await ReplyAsync("Done!");
             }
             else

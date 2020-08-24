@@ -13,11 +13,14 @@ namespace Luna
     {
         public readonly ulong pId;
 
+        public MarkovChain doubleWordChain;
         public MarkovChain wordChain;
         public MarkovChain nGramChain;
 
+        public const string doubleWordMarkovPrefix = "wordMarkov_";
         public const string wordMarkovPrefix = "wordMarkov_";
         public const string gramMarkovPrefix = "gramMarkov_";
+        public string MarkovDoubleWordPath => $"{doubleWordMarkovPrefix}{pId}.json";
         public string MarkovWordPath => $"{wordMarkovPrefix}{pId}.json";
         public string MarkovGramPath => $"{gramMarkovPrefix}{pId}.json";
 
@@ -33,6 +36,7 @@ namespace Luna
 
             wordChain = new MarkovChain();
             nGramChain = new MarkovChain();
+            doubleWordChain = new MarkovChain();
 
             mood = new MoodProfile();
             moodWithUser = new MoodProfile();
