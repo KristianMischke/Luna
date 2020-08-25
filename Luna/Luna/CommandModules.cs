@@ -154,6 +154,13 @@ namespace Luna
             }
         }
 
+        [Command("iDidANoNo", true)]
+        public async Task IDidANoNoAsync()
+        {
+            //await MimicCommandHandler._instance.InputOldMessages(Context);
+            //await MimicCommandHandler._instance.SaveOldMessages(Context);
+        }
+
         [Command("ignoreMe", true)]
         [Summary("ignore my messages for now")]
         public async Task IgnoreMimicDataAsync()
