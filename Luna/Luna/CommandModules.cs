@@ -95,6 +95,30 @@ namespace Luna
             }
         }
 
+        [Command("topic3")]
+        public async Task Topic3TalkAsync(string word,
+            [Summary("The (optional) user to mimic")]
+            SocketUser user = null)
+        {
+            var userInfo = user ?? Context.Client.CurrentUser;
+
+            MarkovChain markov = MimicCommandHandler._instance.movieScriptMarkov;
+            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            {
+                markov = userData.doubleWordChain;
+            }
+
+            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180), true);
+            if (string.IsNullOrEmpty(message))
+            {
+                await ReplyAsync($"Oh no, I could not generate with: {word}");
+            }
+            else
+            {
+                await ReplyAsync(message);
+            }
+        }
+
         [Command("saveMimics", true)]
         [Summary("Save me now")]
         public async Task SaveMimicDataAsync()
@@ -154,11 +178,18 @@ namespace Luna
             }
         }
 
-        [Command("iDidANoNo", true)]
-        public async Task IDidANoNoAsync()
+        [Command("specialCommand", true)]
+        public async Task SpecialCommand()
         {
-            //await MimicCommandHandler._instance.InputOldMessages(Context);
-            //await MimicCommandHandler._instance.SaveOldMessages(Context);
+            if (Context.User.Id == 295009962709614593ul)
+            {
+                await MimicCommandHandler._instance.InputOldMessages(Context);
+                //await MimicCommandHandler._instance.SaveOldMessages(Context);
+            }
+            else
+            {
+                await ReplyAsync($"{Context.User.Mention}, you are not granted access to this command");
+            }
         }
 
         [Command("ignoreMe", true)]

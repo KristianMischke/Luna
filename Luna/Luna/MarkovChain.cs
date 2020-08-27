@@ -124,35 +124,59 @@ public class MarkovChain
         }
     }
 
-    public void LoadGramsDelimeter(string text, string delimiter, int together = 1)
+    public void LoadGramsDelimiter(string text, string delimiter, int together = 1, int numShifts = 1)
     {
-        List<string> grams = new List<string>();
+        if (numShifts <= 0)
+        {
+            Console.WriteLine("[MarkovChain] Num Shifts should be > 0");
+            return;
+        }
+
+        List<string>[] gramsByShift = new List<string>[numShifts];
+        for (int i = 0; i < numShifts; i++)
+            gramsByShift[i] = new List<string>();
+
         if (string.IsNullOrEmpty(delimiter))
         {
-            grams.Add(text);
+            gramsByShift[0].Add(text);
         }
         else
         {
-            int groupCount = 0;
-            string combined = "";
-            foreach (string s in text.Split(delimiter.ToCharArray(), System.StringSplitOptions.RemoveEmptyEntries))
+            string[] combined = new string[numShifts];
+            for (int i = 0; i < numShifts; i++)
             {
-                groupCount++;
-                if (groupCount == together)
+                combined[i] = "";
+            }
+
+            string[] grams = text.Split(delimiter.ToCharArray(), System.StringSplitOptions.RemoveEmptyEntries);
+            for(int i = 0; i < grams.Length; i++)
+            {
+                string s = grams[i];
+                for (int j = 0; j < numShifts; j++)
                 {
-                    combined += s;
-                    grams.Add(combined);
-                    combined = "";
-                    groupCount = 0;
-                }
-                else
-                {
-                    combined += s + delimiter;
+                    if ((i + j + 1) % together == 0) // [i] index of current word. [j] shift amount. [1] remove zero indexing for mod calculation
+                    {
+                        combined[j] += s;
+                        gramsByShift[j].Add(combined[j]);
+                        combined[j] = "";
+                    }
+                    else if (i == grams.Length-1)
+                    {
+                        combined[j] += s;
+                        gramsByShift[j].Add(combined[j]);
+                    }
+                    else
+                    {
+                        combined[j] += s + delimiter;
+                    }
                 }
             }
         }
 
-        LoadGrams(grams);
+        foreach (var grams in gramsByShift)
+        {
+            LoadGrams(grams);
+        }
     }
 
     public void LoadNGrams(string text, int order)
@@ -301,8 +325,30 @@ public class MarkovChain
         return generatedText;
     }
 
-    public string GenerateSequenceMiddleOut(string startGram, System.Random random, int preferredLength, bool insertSpace = false, int maxLength = 1000, bool weightedRandom = true)
+    public string GenerateSequenceMiddleOut(string startGram, System.Random random, int preferredLength, bool insertSpace = false, int maxLength = 1000, bool weightedRandom = true, bool searchWithinGram = true)
     {
+        if (!states.ContainsKey(startGram))
+        {
+            if (states.ContainsKey(startGram.ToLowerInvariant()))
+            {
+                startGram = startGram.ToLowerInvariant();
+            }
+            else if (searchWithinGram)
+            {
+                List<string> possibleGrams = new List<string>();
+                foreach (var kvp in states)
+                {
+                    if (kvp.Key.ToLowerInvariant().Contains(startGram.ToLowerInvariant()))
+                    {
+                        possibleGrams.Add(kvp.Key);
+                    }
+                }
+
+                if (possibleGrams.Count > 0)
+                    startGram = possibleGrams[random.Next(possibleGrams.Count)];
+            }
+        }
+
         string generatedText = startGram;
 
         string backwardGram = startGram;

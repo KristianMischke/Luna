@@ -60,6 +60,10 @@ namespace Luna
         private static bool readyToSave = false;
         private Random r = new Random();
 
+        private static bool allowWordMarkovLogging = true;
+        private static bool allowDoubleWordMarkovLogging = true;
+        private static bool allowGramMarkovLogging = true;
+
         public MarkovChain movieScriptMarkov = new MarkovChain();
 
         Dictionary<ulong, CustomUserData> AllUserData => CommandManager._instance.AllUserData;
@@ -100,6 +104,15 @@ namespace Luna
         {
             string[] mimicFiles = Directory.GetFiles(MimicDirectory);
             ulong tempMessageId = 0;
+
+            foreach (var kvp in AllUserData)
+            {
+                kvp.Value.doubleWordChain.ClearData();
+            }
+
+            allowDoubleWordMarkovLogging = true;
+            allowGramMarkovLogging = false;
+            allowWordMarkovLogging = false;
 
             foreach (string file in mimicFiles)
             {
@@ -221,6 +234,10 @@ namespace Luna
 
             Console.WriteLine("DONE ALL");
             SaveMimicData();
+
+            allowDoubleWordMarkovLogging = true;
+            allowGramMarkovLogging = true;
+            allowWordMarkovLogging = true;
         }
 
         public async Task SaveOldMessages(SocketCommandContext context)
@@ -680,9 +697,13 @@ namespace Luna
                         {
                             _markovSemaphore.WaitOne();
                             //Console.WriteLine($"{item.userID}[{usernameCache[item.userID] ?? ""}] {item.content} [COMMITTED]");
-                            userData.nGramChain.LoadNGrams(item.content, 6);
-                            userData.wordChain.LoadGramsDelimeter(item.content, " ");
-                            userData.doubleWordChain.LoadGramsDelimeter(item.content, " ", together: 2);
+                            if (allowGramMarkovLogging)
+                                userData.nGramChain.LoadNGrams(item.content, 6);
+                            if (allowWordMarkovLogging)
+                                userData.wordChain.LoadGramsDelimiter(item.content, " ");
+                            if (allowDoubleWordMarkovLogging)
+                                userData.doubleWordChain.LoadGramsDelimiter(item.content, " ", together: 2, numShifts: 2);
+
                             _markovSemaphore.Release();
                             messageCache.TryRemove(keys[i], out _);
                         }
@@ -1024,10 +1045,13 @@ namespace Luna
                 _markovSemaphore.WaitOne();
                 var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
 
-                bool useMovieQuote = r.NextDouble() < 0.3;
                 bool useNGram = r.NextDouble() < 0.3;
-                bool useDouble = r.NextDouble() < 0.3;
-                bool useTopic = r.NextDouble() < 0.5;
+                bool useDouble = r.NextDouble() < 0.4;
+                bool useMovieQuote = r.NextDouble() < 0.3;
+
+                bool useTopic = r.NextDouble() < 0.75;
+
+                bool didUseGIF = false;
 
                 bool insertSpaces = !useNGram && !useMovieQuote;
 
@@ -1055,10 +1079,12 @@ namespace Luna
                     if (allowGIF && string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.35)
                     {
                         newMessageText = await GetGIFLink(topic);
+                        didUseGIF = true;
                     }
                 }
                 if (string.IsNullOrEmpty(newMessageText))
                 {
+                    didUseGIF = false;
                     newMessageText = markov.GenerateSequence(generateMood, r, r.Next(25, 180), (x) => GetMood(x, false), insertSpaces);
                 }
 
@@ -1074,7 +1100,8 @@ namespace Luna
                         }
                     }
 
-                    string msgType = (useMovieQuote ? "quote" : (useDouble ? "doubleWord" : (useNGram ? "nGram" : "wordGram")));
+                    usernameCache[kvp.Key] = (await message.Channel.GetUserAsync(kvp.Key))?.Username ?? "";
+                    string msgType = (didUseGIF ? "GIF" : (useMovieQuote ? "quote" : (useDouble ? "doubleWord" : (useNGram ? "nGram" : "wordGram"))));
                     Console.WriteLine($"{(useMovieQuote ? "" : kvp.Key.ToString() + $"[{usernameCache.GetValueOrDefault(kvp.Key, "")}]")} {msgType} | {newMessageText}");
                     Console.WriteLine();
                 }
