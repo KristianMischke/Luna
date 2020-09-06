@@ -349,11 +349,25 @@ namespace Luna.Sentiment
 
     public static class MoodMarkovExtension
     {
-        public static string GenerateSequence(this MarkovChain markov, MoodProfile moodGoal, Random random, int preferredLength, Func<string, MoodProfile> getMood, bool insertSpace = false, int maxLength = 1000, bool weightedRandom = true)
+        public static string GenerateSequence(this MarkovChain markov, MoodProfile moodGoal, Random random, int preferredLength, Func<string, MoodProfile> getMood, int maxLength = 1000, bool weightedRandom = true)
         {
-            string generatedText = "";
-            string tempGram = "";
-            string gram = markov.StartGram;
+            Queue<MarkovChain.ScopeType> p = null, f = null;
+            string result = markov.GenerateRecursive(out bool success, MarkovChain.START_GRAM, random, (prev, r, ignore) => GetBestEmotion(markov, prev, moodGoal, r, getMood, ignore), ref p, ref f);
+            if (success)
+            {
+                return result;
+            }
+            else
+            {
+                return "_ _";
+            }
+
+            /*string generatedText = "";
+            MarkovChain.MarkovEdge temp;
+
+            string gram = MarkovChain.START_GRAM;
+            Queue<MarkovChain.ScopeType> currentScope = new Queue<MarkovChain.ScopeType>();
+            currentScope.Enqueue(MarkovChain.ScopeType.NONE);
 
             string targetMood = moodGoal.GetPrimaryMood();
 
@@ -363,51 +377,73 @@ namespace Luna.Sentiment
                 // try 4 times to get the mood of the text to match the goal before moving to the next gram
                 //for (int i = 0; i < 10; i++)
                 {
-                    tempGram = markov.GetNextGram(gram, random, (x) => GetBestEmotion(x, moodGoal, random, getMood), generatedText.Length + (markov.Order == -1 ? 0 : markov.Order * 3) >= preferredLength);
+                    temp = markov.GetNextEdge(gram, random, (x) => GetBestEmotion(markov, x, moodGoal, random, getMood), currentScope.Peek(), MarkovChain.ScopeType.NONE, generatedText.Length + (markov.Order == -1 ? 0 : markov.Order * 3) >= preferredLength);
 
-                    /*MoodProfile testMood = getMood(generatedText + gram);
-                    if (testMood.GetPrimaryMood() == targetMood)
-                    {
-                        break;
-                    }*/
+                    //MoodProfile testMood = getMood(generatedText + gram);
+                    //if (testMood.GetPrimaryMood() == targetMood)
+                    //{
+                    //    break;
+                    //}
+        }
+                if(temp != null && temp.to == MarkovChain.END_GRAM && (string.IsNullOrEmpty(generatedText) || currentScope.Count > 1))
+                    continue;
+
+                if (temp != null)
+                    gram = temp.to;
+
+                if (currentScope.Peek() != MarkovChain.ScopeType.NONE && temp.endScope == currentScope.Peek())
+                {
+                    currentScope.Dequeue();
                 }
-                gram = tempGram;
+                else if (temp.startScope != MarkovChain.ScopeType.NONE)
+                {
+                    currentScope.Enqueue(temp.startScope);
+                }
 
-                if (gram != markov.EndGram)
-                    generatedText += gram;
+                if (gram != MarkovChain.END_GRAM)
+                    generatedText += temp.transition + gram;
 
-                if (insertSpace)
-                    generatedText += " ";
-
-                if (gram == "" || gram == markov.EndGram || generatedText.Length > maxLength)
+                if (gram == MarkovChain.END_GRAM || generatedText.Length > maxLength)
                     satisfied = true;
             }
 
-            return generatedText;
+            return generatedText;*/
         }
 
-        private static string GetBestEmotion(MarkovChain.MarkovState prev, MoodProfile moodGoal, Random r, Func<string, MoodProfile> getMood)
+        private static MarkovChain.MarkovEdge GetBestEmotion(MarkovChain markov, string prev, MoodProfile moodGoal, Random r, Func<string, MoodProfile> getMood, HashSet<MarkovChain.MarkovEdge> ignoreEdges)
         {
             string moodGoalPrimary = moodGoal.GetPrimaryMood();
 
-            SortedList<double, string> sorted = new SortedList<double, string>();
+            SortedList<double, MarkovChain.MarkovEdge> sorted = new SortedList<double, MarkovChain.MarkovEdge>();
 
-            foreach (KeyValuePair<string, int> kvp in prev.next)
+            foreach (var kvp in markov.edgeFromToTrans[prev])
             {
                 MoodProfile m = getMood(kvp.Key);
 
-                if (m.GetPrimaryMood() == moodGoalPrimary)
+                foreach (var subKvp in kvp.Value)
                 {
-                    sorted[r.NextDouble()] = kvp.Key; // very low number for target mood (i.e. top of the list)
+                    if (!ignoreEdges.Contains(subKvp.Value))
+                    {
+                        if (m.GetPrimaryMood() == moodGoalPrimary)
+                        {
+                            sorted[r.NextDouble()] =
+                                subKvp.Value; // very low number for target mood (i.e. top of the list)
+                        }
+                        else if (moodGoalPrimary == "nukey")
+                        {
+                            sorted[10 - m.nukeyness + r.NextDouble()] = subKvp.Value;
+                        }
+                        else
+                        {
+                            sorted[10 - m.emotion[moodGoalPrimary] + r.NextDouble()] = subKvp.Value;
+                        }
+                    }
                 }
-                else if (moodGoalPrimary == "nukey")
-                {
-                    sorted[10 - m.nukeyness + r.NextDouble()] = kvp.Key;
-                }
-                else
-                {
-                    sorted[10 - m.emotion[moodGoalPrimary] + r.NextDouble()] = kvp.Key;
-                }
+            }
+
+            if (sorted.Count == 0)
+            {
+                return null;
             }
 
             // get a random item near the front of the list
@@ -423,7 +459,7 @@ namespace Luna.Sentiment
             if (sorted.Values.Count == 0)
             {
                 Console.WriteLine("[WordSentiment] Values.Count == 0");
-                Console.WriteLine($"prev = {prev.gram}");
+                Console.WriteLine($"prev = {prev}");
             }
 
             return sorted.Values[index];

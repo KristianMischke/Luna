@@ -108,11 +108,13 @@ namespace Luna
             foreach (var kvp in AllUserData)
             {
                 kvp.Value.doubleWordChain.ClearData();
+                kvp.Value.nGramChain.ClearData();
+                kvp.Value.wordChain.ClearData();
             }
 
-            allowDoubleWordMarkovLogging = true;
-            allowGramMarkovLogging = false;
-            allowWordMarkovLogging = false;
+            //allowDoubleWordMarkovLogging = false;
+            //allowGramMarkovLogging = false;
+            //allowWordMarkovLogging = true;
 
             foreach (string file in mimicFiles)
             {
@@ -202,17 +204,17 @@ namespace Luna
                                                     SocketUser u = context.Guild.GetUser(uid);
                                                     usernameCache[uid] = u.Username;
 
-                                                    if (!u.IsBot)
-                                                    {
-                                                        Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
-                                                        mimicString = userIDRegex.Replace(mimicString, u.Username);
-                                                    }
+                                                    Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
+                                                    mimicString = userIDRegex.Replace(mimicString, MarkovChain.USER_GRAM);
                                                 }
                                                 catch (Exception e)
                                                 {
                                                 }
                                             }
                                         }
+
+                                        uidRegex = new Regex(@"<@(|!|&)\d+>");
+                                        mimicString = uidRegex.Replace(mimicString, MarkovChain.USER_GRAM);
 
                                         mimicString = mimicString.Replace("@everyone", "everyone");
                                         LogMimicData(authorId, tempMessageId++, mimicString, DateTimeOffset.Now.Subtract(new TimeSpan(0, 0, 1, 0)));
@@ -548,7 +550,7 @@ namespace Luna
 
                                 string[] arr = line.Split(" +++$+++ ");
 
-                                movieScriptMarkov.LoadNGrams(arr[arr.Length - 1], 6);
+                                movieScriptMarkov.LoadWordGramsFancy(arr[arr.Length - 1]);
 
                                 count++;
                             } while (line != null && count < 100000);
@@ -661,9 +663,9 @@ namespace Luna
                 TaskCreationOptions.LongRunning, TaskScheduler.Current);
         }
 
-        DateTimeOffset lastMessageTime = DateTimeOffset.UtcNow;
-        DateTimeOffset? myLastMessageTime = null;
-        int lonelyMinutes = -1;
+        static DateTimeOffset lastMessageTime = DateTimeOffset.UtcNow;
+        static DateTimeOffset? myLastMessageTime = null;
+        static int lonelyMinutes = -1;
         private async Task BackgroundUpdate()
         {
             while (true)
@@ -671,7 +673,7 @@ namespace Luna
                 bool commitAll = bgTaskCancellationToken.Token.IsCancellationRequested;
 
                 if (lonelyMinutes == -1)
-                    lonelyMinutes = r.Next(90, 180);
+                    lonelyMinutes = r.Next(90, 120);
 
                 while (messageEditQueue.Count > 0)
                 {
@@ -700,7 +702,7 @@ namespace Luna
                             if (allowGramMarkovLogging)
                                 userData.nGramChain.LoadNGrams(item.content, 6);
                             if (allowWordMarkovLogging)
-                                userData.wordChain.LoadGramsDelimiter(item.content, " ");
+                                userData.wordChain.LoadWordGramsFancy(item.content);
                             if (allowDoubleWordMarkovLogging)
                                 userData.doubleWordChain.LoadGramsDelimiter(item.content, " ", together: 2, numShifts: 2);
 
@@ -719,6 +721,7 @@ namespace Luna
                 if (DateTimeOffset.UtcNow.Subtract(lastMessageTime).Minutes > lonelyMinutes &&
                     DateTimeOffset.Now.Hour >= 10 && DateTimeOffset.Now.Hour <= 23 && lastGuildID != 0)
                 {
+                    Console.WriteLine("_____SHOULD HAPPEN RN_____");
                     SocketGuild guild = _client.GetGuild(lastGuildID);
                     List<SocketTextChannel> channels = guild.TextChannels.ToList<SocketTextChannel>();
                     if (channels.Count > 0)
@@ -743,28 +746,27 @@ namespace Luna
                             "miss"
                         };
 
-                        var validUsers = AllUserData.Where(x => x.Value.TrackMe);
+                        var validUsers = AllUserData.Where(x => x.Value.TrackMe).ToList();
                         if (validUsers.Any())
                         {
                             _markovSemaphore.WaitOne();
-                            var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
+                            var kvp = validUsers[r.Next(validUsers.Count)];
 
-                            bool useNGram = r.NextDouble() < 0.5;
-
-                            MarkovChain markov = useNGram ? kvp.Value.nGramChain : movieScriptMarkov;
+                            MarkovChain markov = r.NextDouble() < 0.5 ? kvp.Value.wordChain : movieScriptMarkov;
                             string newMessageText = null;
                             string topic = lonelyWords[r.Next(lonelyWords.Length)];
-                            newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), !useNGram);
+                            newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180));
                             if (string.IsNullOrEmpty(newMessageText))
                             {
                                 newMessageText = await GetGIFLink(topic);
                             }
+                            else
+                            {
+                                newMessageText = markov.ReplaceVariables(newMessageText, r, guild.Users.Where(x => x.Id != _client.CurrentUser.Id).Select(x => x.Mention).ToList());
+                            }
 
                             if (newMessageText != null)
                             {
-                                var otherUsers = guild.Users.Where(x => x.Id != _client.CurrentUser.Id).ToList();
-                                string mentionUser = otherUsers[r.Next(otherUsers.Count)].Mention;
-                                newMessageText = mentionUser + " " + newMessageText;
                                 await channel.SendMessageAsync(newMessageText);
                             }
 
@@ -975,7 +977,7 @@ namespace Luna
                             if (!u.IsBot)
                             {
                                 Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
-                                mimicString = userIDRegex.Replace(mimicString, u.Username);
+                                mimicString = userIDRegex.Replace(mimicString, MarkovChain.USER_GRAM);
                             }
                         }
 
@@ -1018,6 +1020,8 @@ namespace Luna
             }
             catch (Exception e)
             {
+                Console.WriteLine(e.ToString());
+
                 var err_context = new SocketCommandContext(_client, message);
                 if (r.NextDouble() < 0.2)
                 {
@@ -1025,7 +1029,9 @@ namespace Luna
                 }
                 else
                 {
-                    await err_context.Channel.SendMessageAsync(errorMessages[r.Next(errorMessages.Count)]);
+                    string errorQuip = errorMessages[r.Next(errorMessages.Count)];
+                    if (!string.IsNullOrEmpty(errorQuip))
+                        await err_context.Channel.SendMessageAsync(errorQuip);
                 }
 
                 string err_msg = e.ToString();
@@ -1046,14 +1052,12 @@ namespace Luna
                 var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
 
                 bool useNGram = r.NextDouble() < 0.3;
-                bool useDouble = r.NextDouble() < 0.4;
+                bool useDouble = false;//r.NextDouble() < 0.4;
                 bool useMovieQuote = r.NextDouble() < 0.3;
 
                 bool useTopic = r.NextDouble() < 0.75;
 
                 bool didUseGIF = false;
-
-                bool insertSpaces = !useNGram && !useMovieQuote;
 
                 MarkovChain markov = useNGram ? kvp.Value.nGramChain : kvp.Value.wordChain;
                 if (useDouble)
@@ -1075,7 +1079,7 @@ namespace Luna
                         int rIndex = r.Next(message.Content.Length - markov.Order);
                         topic = message.Content.Substring(rIndex, markov.Order);
                     }
-                    newMessageText = markov.GenerateSequenceMiddleOut(topic, r, r.Next(25, 180), insertSpaces);
+                    newMessageText = markov.GenerateSequenceMiddleOut(topic, r, /*r.Next(25, 180)*/1000);
                     if (allowGIF && string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.35)
                     {
                         newMessageText = await GetGIFLink(topic);
@@ -1085,7 +1089,17 @@ namespace Luna
                 if (string.IsNullOrEmpty(newMessageText))
                 {
                     didUseGIF = false;
-                    newMessageText = markov.GenerateSequence(generateMood, r, r.Next(25, 180), (x) => GetMood(x, false), insertSpaces);
+                    newMessageText = markov.GenerateSequence(generateMood, r, /*r.Next(25, 180)*/1000, (x) => GetMood(x, false));
+                }
+                if (string.IsNullOrEmpty(newMessageText)) // mood failed ?!
+                {
+                    didUseGIF = false;
+                    newMessageText = markov.GenerateSequence(r, /*r.Next(25, 180)*/1000);
+                }
+
+                if (!string.IsNullOrEmpty(newMessageText) && !didUseGIF)
+                {
+                    newMessageText = markov.ReplaceVariables(newMessageText, r, new List<string>{message.Author.Mention});
                 }
 
                 if (logToConsole)

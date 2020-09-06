@@ -25,7 +25,7 @@ namespace Luna
 
             if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(userData.wordChain.GenerateSequence(r, r.Next(25, 180), true));
+                await ReplyAsync(userData.wordChain.GenerateSequence(r, r.Next(25, 180)));
             }
             else
             {
@@ -44,7 +44,7 @@ namespace Luna
 
             if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(userData.nGramChain.GenerateSequence(r, r.Next(25, 180), false));
+                await ReplyAsync(userData.nGramChain.GenerateSequence(r, r.Next(25, 180)));
             }
             else
             {
@@ -63,7 +63,7 @@ namespace Luna
 
             if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(userData.doubleWordChain.GenerateSequence(r, r.Next(25, 180), true));
+                await ReplyAsync(userData.doubleWordChain.GenerateSequence(r, r.Next(25, 180)));
             }
             else
             {
@@ -84,13 +84,14 @@ namespace Luna
                 markov = userData.wordChain;
             }
 
-            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180), true);
+            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180));
             if (string.IsNullOrEmpty(message))
             {
                 await ReplyAsync($"Oh no, I could not generate with: {word}");
             }
             else
             {
+                message = markov.ReplaceVariables(message, r, new List<string> {Context.User.Mention});
                 await ReplyAsync(message);
             }
         }
@@ -108,13 +109,14 @@ namespace Luna
                 markov = userData.doubleWordChain;
             }
 
-            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180), true);
+            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180));
             if (string.IsNullOrEmpty(message))
             {
                 await ReplyAsync($"Oh no, I could not generate with: {word}");
             }
             else
             {
+                message = markov.ReplaceVariables(message, r, new List<string> { Context.User.Mention });
                 await ReplyAsync(message);
             }
         }
