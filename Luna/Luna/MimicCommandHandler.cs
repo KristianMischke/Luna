@@ -571,6 +571,11 @@ namespace Luna
                 {
                     JObject data = await JObject.LoadAsync(new JsonTextReader(reader));
                     moodProfile.LoadJson((JObject)data["mood"]);
+
+                    if (data.Property("lastAvatarUpdate") != null)
+                    {
+                         lastAvatarSetDate = DateTime.Parse((string)data["lastAvatarUpdate"]);
+                    }
                 }
             }
 
@@ -674,6 +679,8 @@ namespace Luna
 
                 if (lonelyMinutes == -1)
                     lonelyMinutes = r.Next(90, 120);
+
+                await CheckAndUpdateAvatar();
 
                 while (messageEditQueue.Count > 0)
                 {
@@ -782,6 +789,20 @@ namespace Luna
             bgTaskCancellationToken.Dispose();
         }
 
+
+        DateTime avatarStartDate = new DateTime(2020, 9, 6);
+        DateTime? lastAvatarSetDate = null;
+        private async Task CheckAndUpdateAvatar()
+        {
+            if (lastAvatarSetDate == null || lastAvatarSetDate.Value.Date != DateTime.Now.Date)
+            {
+                int numDays = DateTime.Now.Subtract(avatarStartDate).Days;
+                lastAvatarSetDate = DateTime.Now;
+
+                await _client.CurrentUser.ModifyAsync(x => x.Avatar = new Image($"{MimicCommandHandler._instance.MimicDirectory}/avatar/day{numDays.ToString("D4")}.png"));
+            }
+        }
+
         public void Cleanup()
         {
             SaveMimicData(true);
@@ -802,6 +823,12 @@ namespace Luna
 
                 jwriter.WritePropertyName("mood");
                 moodProfile.WriteToJson(jwriter);
+
+                if (lastAvatarSetDate.HasValue)
+                {
+                    jwriter.WritePropertyName("lastAvatarUpdate");
+                    jwriter.WriteValue(lastAvatarSetDate.Value.Date);
+                }
 
                 jwriter.WriteEndObject();
             }
