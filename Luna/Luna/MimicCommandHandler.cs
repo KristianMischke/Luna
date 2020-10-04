@@ -306,12 +306,13 @@ namespace Luna
                                     usernameCache[u.Id] = u.Username;
                                     if (!u.IsBot)
                                     {
-                                        Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
-                                        mimicString = userIDRegex.Replace(mimicString, u.Username);
+                                        //Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
+                                        //mimicString = userIDRegex.Replace(mimicString, u.Username);
                                     }
                                 }
 
                                 mimicString = mimicString.Replace("@everyone", "everyone");
+                                Console.WriteLine(mimicString);
                                 await sr.WriteLineAsync($"{message.Author.Id}[{message.Author.Username}] {mimicString}");
                                 //_ = Task.Factory.StartNew(() =>
                                 //    LogMimicData(message.Author.Id, message.Id, mimicString, message.EditedTimestamp));
@@ -549,8 +550,9 @@ namespace Luna
                                 line = await sr.ReadLineAsync();
 
                                 string[] arr = line.Split(" +++$+++ ");
-
-                                movieScriptMarkov.LoadWordGramsFancy(arr[arr.Length - 1]);
+                                string text = arr[arr.Length - 1];
+                                text = PreProcessUserMessage(text, null);
+                                movieScriptMarkov.LoadWordGramsFancy(text);
 
                                 count++;
                             } while (line != null && count < 100000);
@@ -608,18 +610,6 @@ namespace Luna
                     catch (FileNotFoundException) { }
                     catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
                 }
-                else if (fileName.StartsWith(CustomUserData.doubleWordMarkovPrefix))
-                {
-                    ulong id = ulong.Parse(fileName.Substring(CustomUserData.doubleWordMarkovPrefix.Length));
-                    if (!AllUserData.TryGetValue(id, out CustomUserData playerData))
-                    {
-                        playerData = AllUserData[id] = new CustomUserData(id);
-                    }
-
-                    try { playerData.doubleWordChain.LoadFromSave(file); }
-                    catch (FileNotFoundException) { }
-                    catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
-                }
                 else if (fileName.StartsWith("data_"))
                 {
                     ulong id = ulong.Parse(fileName.Substring("data_".Length));
@@ -668,8 +658,9 @@ namespace Luna
                 TaskCreationOptions.LongRunning, TaskScheduler.Current);
         }
 
+        static Dictionary<ulong, DateTimeOffset> myLastMessageTime = new Dictionary<ulong, DateTimeOffset>();
+
         static DateTimeOffset lastMessageTime = DateTimeOffset.UtcNow;
-        static DateTimeOffset? myLastMessageTime = null;
         static int lonelyMinutes = -1;
         private async Task BackgroundUpdate()
         {
@@ -790,16 +781,16 @@ namespace Luna
         }
 
 
-        DateTime avatarStartDate = new DateTime(2020, 9, 6);
+        readonly DateTime avatarStartDate = new DateTime(2020, 9, 8, 8, 0, 0);
         DateTime? lastAvatarSetDate = null;
         private async Task CheckAndUpdateAvatar()
         {
-            if (lastAvatarSetDate == null || lastAvatarSetDate.Value.Date != DateTime.Now.Date)
+            if (lastAvatarSetDate == null || lastAvatarSetDate.Value.Date != DateTime.Now.Date || lastAvatarSetDate.Value.Hour != DateTime.Now.Hour)
             {
-                int numDays = DateTime.Now.Subtract(avatarStartDate).Days;
+                int numHours = (int)DateTime.Now.Subtract(avatarStartDate).TotalHours;
                 lastAvatarSetDate = DateTime.Now;
 
-                await _client.CurrentUser.ModifyAsync(x => x.Avatar = new Image($"{MimicCommandHandler._instance.MimicDirectory}/avatar/day{numDays.ToString("D4")}.png"));
+                await _client.CurrentUser.ModifyAsync(x => x.Avatar = new Image($"{MimicDirectory}/avatar/{numHours.ToString("D4")}.png"));
             }
         }
 
@@ -810,8 +801,16 @@ namespace Luna
 
         public void SaveMimicData(bool isExit = false)
         {
-            bgTaskCancellationToken.Cancel();
-            //while (!readyToSave) Thread.Sleep(100);
+            try
+            {
+                bgTaskCancellationToken.Cancel();
+                //while (!readyToSave) Thread.Sleep(100);
+            }
+            catch
+            {
+                Console.WriteLine("REMEMBER TO FIX THIS MULTITHREADING ISSUE!");
+            }
+            StartBGThread();
 
             _markovSemaphore.WaitOne();
             movieScriptMarkov.Save(MimicDirectory + MOVIE_QUOTE_MARKOV_SAVE);
@@ -827,7 +826,7 @@ namespace Luna
                 if (lastAvatarSetDate.HasValue)
                 {
                     jwriter.WritePropertyName("lastAvatarUpdate");
-                    jwriter.WriteValue(lastAvatarSetDate.Value.Date);
+                    jwriter.WriteValue(lastAvatarSetDate.Value);
                 }
 
                 jwriter.WriteEndObject();
@@ -837,7 +836,6 @@ namespace Luna
             {
                 kvp.Value.wordChain.Save(MimicDirectory + "/" + kvp.Value.MarkovWordPath);
                 kvp.Value.nGramChain.Save(MimicDirectory + "/" + kvp.Value.MarkovGramPath);
-                kvp.Value.doubleWordChain.Save(MimicDirectory + "/" + kvp.Value.MarkovDoubleWordPath);
                 kvp.Value.SaveData(MimicDirectory + "/data_" + kvp.Key + ".json");
             }
             _markovSemaphore.Release();
@@ -864,9 +862,14 @@ namespace Luna
                 bool iAmMentioned = message.MentionedUsers.Select(x => x.Id).Contains(_client.CurrentUser.Id);
                 bool messageContainsLuna = message.Content.ToLowerInvariant().Contains("luna");
                 MoodProfile lastMoodProfile = new MoodProfile(moodProfile);
-                double secondsSinceMyLastMessage = myLastMessageTime.HasValue
-                    ? DateTimeOffset.UtcNow.Subtract(myLastMessageTime.Value).TotalSeconds
-                    : double.MaxValue;
+                double secondsSinceMyLastMessage = double.MaxValue;
+                lock (myLastMessageTime)
+                {
+                    if (myLastMessageTime.TryGetValue(message.Channel.Id, out DateTimeOffset lastMessageTime))
+                    {
+                        secondsSinceMyLastMessage = DateTimeOffset.UtcNow.Subtract(lastMessageTime).TotalSeconds;
+                    }
+                }
 
                 var messageContext = new SocketCommandContext(_client, message);
                 if (messageContext.Guild != null)
@@ -908,7 +911,11 @@ namespace Luna
                     && (words.Length == 2)
                 )
                 {
-                    myLastMessageTime = null;
+                    lock (myLastMessageTime)
+                    {
+                        myLastMessageTime.Remove(message.Channel.Id);
+                    }
+
                     await message.AddReactionAsync(new Emoji("👍"));
                     return;
                 }
@@ -986,7 +993,10 @@ namespace Luna
                                 var context2 = new SocketCommandContext(_client, message);
                                 await context2.Channel.SendMessageAsync(newMessageText);
 
-                                myLastMessageTime = DateTimeOffset.UtcNow;
+                                lock (myLastMessageTime)
+                                {
+                                    myLastMessageTime[message.Channel.Id] = DateTimeOffset.UtcNow;
+                                }
                             }
 
                             threshold += r.NextDouble();
@@ -994,21 +1004,9 @@ namespace Luna
                     }
 
                     usernameCache[message.Author.Id] = message.Author.Username;
-                    if (!iAmMentioned || message.Content.Trim().Split(' ').Length > 1
-                    ) // don't record in mimic data if text is only the bot's mention
+                    if (!iAmMentioned || message.Content.Trim().Split(' ').Length > 1) // don't record in mimic data if text is only the bot's mention
                     {
-                        string mimicString = message.Content;
-                        foreach (SocketUser u in message.MentionedUsers)
-                        {
-                            usernameCache[u.Id] = u.Username;
-                            if (!u.IsBot)
-                            {
-                                Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
-                                mimicString = userIDRegex.Replace(mimicString, MarkovChain.USER_GRAM);
-                            }
-                        }
-
-                        mimicString = mimicString.Replace("@everyone", "everyone");
+                        string mimicString = PreProcessUserMessage(message.Content, message.MentionedUsers);
                         _ = Task.Factory.StartNew(() =>
                             LogMimicData(message.Author.Id, message.Id, mimicString, message.Timestamp));
                     }
@@ -1066,6 +1064,28 @@ namespace Luna
             }
         }
 
+        static Regex profanityRegex = new Regex($"(n+ *i+ *(g *)+(a+|e+ *r+|r+))", RegexOptions.IgnoreCase);
+        public string PreProcessUserMessage(string message, IEnumerable<IUser> mentionedUsers)
+        {
+            if (mentionedUsers != null)
+            {
+                foreach (IUser u in mentionedUsers)
+                {
+                    usernameCache[u.Id] = u.Username;
+                    if (!u.IsBot)
+                    {
+                        Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
+                        message = userIDRegex.Replace(message, MarkovChain.USER_GRAM);
+                    }
+                }
+            }
+
+            message = profanityRegex.Replace(message, "n****");
+
+            message = message.Replace("@everyone", "everyone");
+            return message;
+        }
+
         public async Task<string> GetMimicMessage(SocketUserMessage message, bool allowGIF = true, bool logToConsole = true)
         {
             string newMessageText = null;
@@ -1078,11 +1098,11 @@ namespace Luna
                 _markovSemaphore.WaitOne();
                 var kvp = validUsers.ElementAt(r.Next(validUsers.Count()));
 
-                bool useNGram = r.NextDouble() < 0.3;
+                bool useNGram = r.NextDouble() < 0.2;
                 bool useDouble = false;//r.NextDouble() < 0.4;
-                bool useMovieQuote = r.NextDouble() < 0.3;
+                bool useMovieQuote = r.NextDouble() < 0.1;
 
-                bool useTopic = r.NextDouble() < 0.75;
+                bool useTopic = r.NextDouble() < 0.70;
 
                 bool didUseGIF = false;
 
@@ -1107,7 +1127,7 @@ namespace Luna
                         topic = message.Content.Substring(rIndex, markov.Order);
                     }
                     newMessageText = markov.GenerateSequenceMiddleOut(topic, r, /*r.Next(25, 180)*/1000);
-                    if (allowGIF && string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.35)
+                    if (allowGIF && ((string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.5) || r.NextDouble() < 0.02))
                     {
                         newMessageText = await GetGIFLink(topic);
                         didUseGIF = true;
@@ -1211,8 +1231,6 @@ namespace Luna
                 catch (FileNotFoundException) { }
                 try { userData.nGramChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovGramPath); }
                 catch (FileNotFoundException) { }
-                try { userData.doubleWordChain.LoadFromSave(MimicDirectory + "/" + userData.MarkovDoubleWordPath); }
-                catch (FileNotFoundException) { }
                 _markovSemaphore.Release();
             }
 
@@ -1229,7 +1247,7 @@ namespace Luna
         {
             if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData) && userData.TrackMe)
             {
-                messageEditQueue.Enqueue((message.Author.Id, message.Id, message.Content, message.EditedTimestamp));
+                messageEditQueue.Enqueue((message.Author.Id, message.Id, PreProcessUserMessage(message.Content, message.MentionedUsers), message.EditedTimestamp));
                 usernameCache.TryGetValue(message.Author.Id, out string username);
                 Console.WriteLine($"{message.Author.Id}[{username ?? ""}] {message.Content} [EDITED]");
             }

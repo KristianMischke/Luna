@@ -17,10 +17,8 @@ namespace Luna
         public MarkovChain wordChain;
         public MarkovChain nGramChain;
 
-        public const string doubleWordMarkovPrefix = "doubleMarkov_";
         public const string wordMarkovPrefix = "wordMarkov_";
         public const string gramMarkovPrefix = "gramMarkov_";
-        public string MarkovDoubleWordPath => $"{doubleWordMarkovPrefix}{pId}.json";
         public string MarkovWordPath => $"{wordMarkovPrefix}{pId}.json";
         public string MarkovGramPath => $"{gramMarkovPrefix}{pId}.json";
 
