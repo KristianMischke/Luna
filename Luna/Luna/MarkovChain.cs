@@ -20,6 +20,8 @@ public class MarkovChain
         CURLY_BRACES,
         SQUARE_BRACKETS,
 
+        DISCORD_HIDDEN,
+
         MD_ITALICS_ASTERISK,
         MD_ITALICS_UNDERSCORE,
         MD_BOLD,
@@ -53,6 +55,8 @@ public class MarkovChain
         {"{"    , ScopeType.CURLY_BRACES          },
         {"["    , ScopeType.SQUARE_BRACKETS       },
 
+        {"||"   , ScopeType.DISCORD_HIDDEN        },
+
         {"*"    , ScopeType.MD_ITALICS_ASTERISK   },
         {"_"    , ScopeType.MD_ITALICS_UNDERSCORE },
         {"**"   , ScopeType.MD_BOLD               },
@@ -71,6 +75,8 @@ public class MarkovChain
         {")"    , ScopeType.PARENTHESIS           },
         {"}"    , ScopeType.CURLY_BRACES          },
         {"]"    , ScopeType.SQUARE_BRACKETS       },
+
+        {"||"   , ScopeType.DISCORD_HIDDEN        },
 
         {"*"    , ScopeType.MD_ITALICS_ASTERISK   },
         {"_ "   , ScopeType.MD_ITALICS_UNDERSCORE },
