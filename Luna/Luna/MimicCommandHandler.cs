@@ -787,12 +787,15 @@ namespace Luna
         {
             if (lastAvatarSetDate == null || lastAvatarSetDate.Value.Date != DateTime.Now.Date || lastAvatarSetDate.Value.Hour != DateTime.Now.Hour)
             {
-                int numHours = (int)DateTime.Now.Subtract(avatarStartDate).TotalHours;
+                int numHours = GetNumHoursForAvatar();
                 lastAvatarSetDate = DateTime.Now;
 
-                await _client.CurrentUser.ModifyAsync(x => x.Avatar = new Image($"{MimicDirectory}/avatar/{numHours.ToString("D4")}.png"));
+                await _client.CurrentUser.ModifyAsync(x => x.Avatar = new Image(GetAvatar(numHours)));
             }
         }
+
+        public string GetAvatar(int hour) => $"{MimicDirectory}/avatar/{hour:D4}.png";
+        public int GetNumHoursForAvatar() => (int)DateTime.Now.Subtract(avatarStartDate).TotalHours;
 
         public void Cleanup()
         {
@@ -949,6 +952,14 @@ namespace Luna
 
                         var context = new SocketCommandContext(_client, message);
                         await context.Channel.SendMessageAsync($"Hi {predicate}, I'm Luna");
+                    }
+
+                    // Chicken Butt
+                    Regex chickenButWhatsUpRegex = new Regex(@"^((what'?s|what is) up\??)$");
+                    if (chickenButWhatsUpRegex.IsMatch(message.Content.ToLowerInvariant()) && r.NextDouble() < 0.70)
+                    {
+                        var context = new SocketCommandContext(_client, message);
+                        await context.Channel.SendMessageAsync("Chicken Butt");
                     }
 
                     if (message.Content.Contains("<:aokoping:623298389865660425>") ||

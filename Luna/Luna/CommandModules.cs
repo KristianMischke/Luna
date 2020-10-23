@@ -180,6 +180,17 @@ namespace Luna
             }
         }
 
+        [Command("avatar_num", true)]
+        public async Task AvatarNum()
+        {
+            await ReplyAsync(MimicCommandHandler._instance.GetNumHoursForAvatar().ToString());
+        }
+        [Command("avatar", true)]
+        public async Task Avatar()
+        {
+            await Context.Channel.SendFileAsync(MimicCommandHandler._instance.GetAvatar(MimicCommandHandler._instance.GetNumHoursForAvatar()));
+        }
+
         [Command("specialCommand", true)]
         public async Task SpecialCommand()
         {
