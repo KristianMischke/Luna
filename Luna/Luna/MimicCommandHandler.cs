@@ -943,7 +943,7 @@ namespace Luna
                     }
 
                     // Dad Joke
-                    Regex imDadRegex = new Regex(@"^(i'?m|i am) (?<predicate>(\w+( \w+)?))$");
+                    Regex imDadRegex = new Regex(@"^(w+ )?(i'?m|i am) (?<predicate>(\w+( \w+)?))$");
                     Match dadMatch = imDadRegex.Match(message.Content.ToLowerInvariant());
                     if (dadMatch.Success && dadMatch.Groups["predicate"].Success && r.NextDouble() < 0.8)
                     {
@@ -952,6 +952,18 @@ namespace Luna
 
                         var context = new SocketCommandContext(_client, message);
                         await context.Channel.SendMessageAsync($"Hi {predicate}, I'm Luna");
+                    }
+
+                    // Your Mom joke
+                    Regex yourMomRegex = new Regex(@"^(w+ )?(you'?re|you are) (?<predicate>(\w+( \w+)?))$");
+                    Match momMatch = yourMomRegex.Match(message.Content.ToLowerInvariant());
+                    if (momMatch.Success && momMatch.Groups["predicate"].Success && r.NextDouble() < 0.65)
+                    {
+                        string predicate = message.Content.Substring(momMatch.Groups["predicate"].Index,
+                            momMatch.Groups["predicate"].Length);
+
+                        var context = new SocketCommandContext(_client, message);
+                        await context.Channel.SendMessageAsync($"Your mom is {predicate}");
                     }
 
                     // Chicken Butt
