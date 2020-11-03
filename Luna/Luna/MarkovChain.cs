@@ -969,7 +969,7 @@ public class MarkovChain
         }
         else
         {
-            return "_ _";
+            return "";//"_ _";
         }
 
         /*
@@ -1051,7 +1051,7 @@ public class MarkovChain
         }
         else
         {
-            return "_ _";
+            return "";//"_ _";
         }
 
         /*

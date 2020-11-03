@@ -943,7 +943,7 @@ namespace Luna
                     }
 
                     // Dad Joke
-                    Regex imDadRegex = new Regex(@"^(w+ )?(i'?m|i am) (?<predicate>(\w+( \w+)?))$");
+                    Regex imDadRegex = new Regex(@"^([^\s]+ )?(i'?m|i am) (?<predicate>(\w+( \w+)?))$");
                     Match dadMatch = imDadRegex.Match(message.Content.ToLowerInvariant());
                     if (dadMatch.Success && dadMatch.Groups["predicate"].Success && r.NextDouble() < 0.8)
                     {
@@ -955,7 +955,7 @@ namespace Luna
                     }
 
                     // Your Mom joke
-                    Regex yourMomRegex = new Regex(@"^(w+ )?(you'?re|you are) (?<predicate>(\w+( \w+)?))$");
+                    Regex yourMomRegex = new Regex(@"^([^\s]+ )?(you'?re|you are) (?<predicate>(\w+( \w+)?))$");
                     Match momMatch = yourMomRegex.Match(message.Content.ToLowerInvariant());
                     if (momMatch.Success && momMatch.Groups["predicate"].Success && r.NextDouble() < 0.65)
                     {
@@ -1008,7 +1008,7 @@ namespace Luna
                         do
                         {
                             string newMessageText = await GetMimicMessage(message);
-                            if (!string.IsNullOrEmpty(newMessageText))
+                            if (!string.IsNullOrWhiteSpace(newMessageText))
                             {
                                 MoodProfile newMessageMood = GetMood(newMessageText, true);
                                 moodProfile.Mix(newMessageMood, (float) r.NextDouble());
@@ -1070,7 +1070,7 @@ namespace Luna
             {
                 Console.WriteLine(e.ToString());
 
-                var err_context = new SocketCommandContext(_client, message);
+                /*var err_context = new SocketCommandContext(_client, message);
                 if (r.NextDouble() < 0.2)
                 {
                     await err_context.Channel.SendMessageAsync(await GetGIFLink("error"));
@@ -1084,6 +1084,7 @@ namespace Luna
 
                 string err_msg = e.ToString();
                 await err_context.Channel.SendMessageAsync(err_msg.Substring(0, Math.Min(1000, err_msg.Length)));
+                */
             }
         }
 
@@ -1150,24 +1151,24 @@ namespace Luna
                         topic = message.Content.Substring(rIndex, markov.Order);
                     }
                     newMessageText = markov.GenerateSequenceMiddleOut(topic, r, /*r.Next(25, 180)*/1000);
-                    if (allowGIF && ((string.IsNullOrEmpty(newMessageText) && r.NextDouble() < 0.5) || r.NextDouble() < 0.02))
+                    if (allowGIF && ((string.IsNullOrWhiteSpace(newMessageText) && r.NextDouble() < 0.5) || r.NextDouble() < 0.02))
                     {
                         newMessageText = await GetGIFLink(topic);
                         didUseGIF = true;
                     }
                 }
-                if (string.IsNullOrEmpty(newMessageText))
+                if (string.IsNullOrWhiteSpace(newMessageText))
                 {
                     didUseGIF = false;
                     newMessageText = markov.GenerateSequence(generateMood, r, /*r.Next(25, 180)*/1000, (x) => GetMood(x, false));
                 }
-                if (string.IsNullOrEmpty(newMessageText)) // mood failed ?!
+                if (string.IsNullOrWhiteSpace(newMessageText)) // mood failed ?!
                 {
                     didUseGIF = false;
                     newMessageText = markov.GenerateSequence(r, /*r.Next(25, 180)*/1000);
                 }
 
-                if (!string.IsNullOrEmpty(newMessageText) && !didUseGIF)
+                if (!string.IsNullOrWhiteSpace(newMessageText) && !didUseGIF)
                 {
                     newMessageText = markov.ReplaceVariables(newMessageText, r, new List<string>{message.Author.Mention});
                 }
@@ -1325,18 +1326,26 @@ namespace Luna
             int limit = 40;
             string url = "https://" + $"api.tenor.com/v1/search?q={searchTerm}&key={Environment.GetEnvironmentVariable("TENOR_GIF_API_KEY", EnvironmentVariableTarget.User)}&limit={limit}";
 
-            HttpResponseMessage response = await _httpClient.GetAsync(url);
+            try
+            {
+                HttpResponseMessage response = await _httpClient.GetAsync(url);
 
-            Stream s = await response.Content.ReadAsStreamAsync();
+                Stream s = await response.Content.ReadAsStreamAsync();
 
-            JObject jObject = await JObject.LoadAsync(new JsonTextReader(new StreamReader(s)));
-            //Console.WriteLine(jObject.ToString());
+                JObject jObject = await JObject.LoadAsync(new JsonTextReader(new StreamReader(s)));
+                //Console.WriteLine(jObject.ToString());
 
-            JArray results = jObject?["results"] as JArray;
-            if (results.Count == 0) return null;
-            JObject rand = results?[r.Next(results.Count)] as JObject;
+                JArray results = jObject?["results"] as JArray;
+                if (results.Count == 0) return null;
+                JObject rand = results?[r.Next(results.Count)] as JObject;
 
-            return (string)rand?["url"];
+                return (string) rand?["url"];
+            }
+            catch (HttpRequestException e)
+            {
+                Console.WriteLine(e.Message);
+                return null;
+            }
         }
     }
 }

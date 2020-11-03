@@ -359,7 +359,7 @@ namespace Luna.Sentiment
             }
             else
             {
-                return "_ _";
+                return "";//"_ _";
             }
 
             /*string generatedText = "";
@@ -412,6 +412,11 @@ namespace Luna.Sentiment
 
         private static MarkovChain.MarkovEdge GetBestEmotion(MarkovChain markov, string prev, MoodProfile moodGoal, Random r, Func<string, MoodProfile> getMood, HashSet<MarkovChain.MarkovEdge> ignoreEdges)
         {
+            if (!markov.edgeFromToTrans.ContainsKey(prev))
+            {
+                return null;
+            }
+
             string moodGoalPrimary = moodGoal.GetPrimaryMood();
 
             SortedList<double, MarkovChain.MarkovEdge> sorted = new SortedList<double, MarkovChain.MarkovEdge>();
