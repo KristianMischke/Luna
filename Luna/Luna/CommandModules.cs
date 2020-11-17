@@ -4,8 +4,11 @@ using Discord.WebSocket;
 using Luna.Sentiment;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using LingK;
 
 namespace Luna
 {
@@ -23,102 +26,184 @@ namespace Luna
         {
             var userInfo = user ?? Context.Client.CurrentUser;
 
-            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            if (!MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
             {
-                await ReplyAsync(userData.wordChain.GenerateSequence(r, r.Next(25, 180)));
+                userData = MimicCommandHandler._instance.LunasUser;
             }
-            else
+
+            string response = MarkovGenerator.GenerateWithBackoff(r, userData.unigramMatrix, userData.bigramMatrix, userData.trigramMatrix, MarkovGenerator.StupidBackoff);
+            if (!string.IsNullOrEmpty(response))
             {
-                await ReplyAsync($"Oh no, I could not mimic {user?.Username ?? "them"}");
+                await ReplyAsync();
             }
         }
 
-        [Command("mimic2")]
-        [Summary("Mimicry is the best form of flattery")]
-        //[Alias("user", "whois")]
-        public async Task Mimic2UserAsync(
-            [Summary("The (optional) user to mimic")]
-            SocketUser user = null)
-        {
-            var userInfo = user ?? Context.Client.CurrentUser;
+        //[Command("topic")]
+        //public async Task TopicTalkAsync(string word,
+        //    [Summary("The (optional) user to mimic")]
+        //    SocketUser user = null)
+        //{
+        //    var userInfo = user ?? Context.Client.CurrentUser;
+        //
+        //    MarkovChain markov = MimicCommandHandler._instance.movieScriptMarkov;
+        //    if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+        //    {
+        //        markov = userData.wordChain;
+        //    }
+        //
+        //    string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180));
+        //    if (string.IsNullOrEmpty(message))
+        //    {
+        //        await ReplyAsync($"Oh no, I could not generate with: {word}");
+        //    }
+        //    else
+        //    {
+        //        message = markov.ReplaceVariables(message, r, new List<string> {Context.User.Mention});
+        //        await ReplyAsync(message);
+        //    }
+        //}
 
-            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
-            {
-                await ReplyAsync(userData.nGramChain.GenerateSequence(r, r.Next(25, 180)));
-            }
-            else
-            {
-                await ReplyAsync($"Oh no, I could not mimic {user?.Username ?? "them"}");
-            }
+        [Command("pmi")]
+        public async Task PMI(string w1, string w2, float lambda = 0)
+        {
+            PMICalculator pmiCalc = MimicCommandHandler._instance.LunasUser.pmiCalc;
+            await ReplyAsync(pmiCalc.PMILambda(w1, w2, lambda).ToString());
+            await ReplyAsync($"Math.Log({pmiCalc.PLambda(w1, w2, lambda)} / ({pmiCalc.PLambda(w1, lambda)} * {pmiCalc.PLambda(w2, lambda)}), 2)");
         }
 
-        [Command("mimic3")]
-        [Summary("Mimicry is the best form of flattery")]
-        //[Alias("user", "whois")]
-        public async Task Mimic3UserAsync(
-            [Summary("The (optional) user to mimic")]
-            SocketUser user = null)
+        [Command("important")]
+        public async Task FindImportantMessages(int window = 50, int num = 3)
         {
-            var userInfo = user ?? Context.Client.CurrentUser;
+            if (num > 10 || (window > 1000 && Context.User.Id != 295009962709614593ul))
+            {
+                await Context.Message.AddReactionAsync(new Emoji("❌"));
+                return;
+            }
 
-            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            CustomUserData userData = MimicCommandHandler._instance.LunasUser;
+
+            List<(float, string, IMessage)> pmiMessages = new List<(float, string, IMessage)>();
+
+            var asyncEnumerator = Context.Channel.GetMessagesAsync(window).GetEnumerator();
+            while (await asyncEnumerator.MoveNext())
             {
-                await ReplyAsync(userData.doubleWordChain.GenerateSequence(r, r.Next(25, 180)));
+                foreach (IMessage message in asyncEnumerator.Current)
+                {
+                    if (!string.IsNullOrEmpty(message.Content) && !message.Author.IsBot
+                        && !message.Content.StartsWith('~')
+                        && !message.Content.StartsWith('!')
+                        && !message.Content.StartsWith('#')
+                        && !message.Content.StartsWith('?'))
+                    {
+                        List<IUser> mentionedUsers = new List<IUser>();
+                        foreach (ulong uID in message.MentionedUserIds)
+                        {
+                            mentionedUsers.Add(await Context.Channel.GetUserAsync(uID));
+                        }
+
+                        string messageContent = MimicCommandHandler._instance.PreProcessUserMessage(message.Content, mentionedUsers);
+                        
+                        List<string> tokens = BasicTokenizer.Tokenize(messageContent);
+                        List<string> words = tokens.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+
+                        float highestPMI = float.NegativeInfinity;
+                        string w1 = "";
+                        string w2 = "";
+                        for (int i = 0; i < words.Count - 1; i++)
+                        {
+                            for (int j = i + 1; j < words.Count; j++)
+                            {
+                                float pmi = MimicCommandHandler._instance.LunasUser.pmiCalc.PMI(words[i], words[j]);
+                                if (pmi > highestPMI)
+                                {
+                                    highestPMI = pmi;
+                                    w1 = words[i];
+                                    w2 = words[j];
+                                }
+                            }
+                        }
+
+                        if (highestPMI > float.NegativeInfinity)
+                        {
+                            pmiMessages.Add((highestPMI, messageContent.Replace(w1, "**" + w1 + "**").Replace(w2, "**" + w2 + "**"), message));
+                        }
+                    }
+                }
             }
-            else
+            
+            List<(float, string, IMessage)> sortedList = pmiMessages.OrderByDescending(x => x.Item1).ToList();
+            StringBuilder responseBuilder = new StringBuilder();
+            EmbedBuilder embedBuilder = new EmbedBuilder();
+            for (int i = 0; i < num && i < sortedList.Count; i++)
             {
-                await ReplyAsync($"Oh no, I could not mimic {user?.Username ?? "them"}");
+                responseBuilder.Append(sortedList[i].Item1.ToString()).Append(" - ").Append(sortedList[i].Item3).AppendLine();
+                responseBuilder.Append("```").Append(sortedList[i].Item2).Append("```").AppendLine().AppendLine();
+
+                embedBuilder.AddField("pmi", sortedList[i].Item1.ToString(), true);
+                embedBuilder.AddField("link", $"[goto;]({sortedList[i].Item3.GetJumpUrl()})", true);
+                embedBuilder.AddField("msg", sortedList[i].Item2);
             }
+
+            //await ReplyAsync(responseBuilder.ToString());
+            await ReplyAsync(embed: embedBuilder.Build());
         }
 
-        [Command("topic")]
-        public async Task TopicTalkAsync(string word,
-            [Summary("The (optional) user to mimic")]
-            SocketUser user = null)
+
+        [Command("stats")]
+        public async Task UserStats(SocketUser user = null, string type = null, int num = 5, float lambda = 0f, float max = float.PositiveInfinity)
         {
-            var userInfo = user ?? Context.Client.CurrentUser;
+            StringBuilder responseBuilder = new StringBuilder();
 
-            MarkovChain markov = MimicCommandHandler._instance.movieScriptMarkov;
-            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
+            CustomUserData userData = MimicCommandHandler._instance.LunasUser;
+            if (user != null && user.Id != Context.Client.CurrentUser.Id && !MimicCommandHandler._instance.GetConsentualUser(user.Id, out userData))
             {
-                markov = userData.wordChain;
-            }
-
-            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180));
-            if (string.IsNullOrEmpty(message))
-            {
-                await ReplyAsync($"Oh no, I could not generate with: {word}");
+                responseBuilder.Append($"Oh no, I count not find {user?.Username + "'s" ?? "their"} stats");
             }
             else
             {
-                message = markov.ReplaceVariables(message, r, new List<string> {Context.User.Mention});
-                await ReplyAsync(message);
+                if (type == "tri")
+                {
+                    var e = userData.trigramMatrix.GetColumn("all").OrderByDescending(kvp => kvp.Value).GetEnumerator();
+                    int i = 0;
+                    while (i++ < num && e.MoveNext())
+                    {
+                        responseBuilder.Append(e.Current.Key).Append(" - ").Append(e.Current.Value);
+                        responseBuilder.AppendLine();
+                    }
+                }
+                else if (type == "bi")
+                {
+                    var e = userData.bigramMatrix.GetColumn("all").OrderByDescending(kvp => kvp.Value).GetEnumerator();
+                    int i = 0;
+                    while (i++ < num && e.MoveNext())
+                    {
+                        responseBuilder.Append(e.Current.Key).Append(" - ").Append(e.Current.Value);
+                        responseBuilder.AppendLine();
+                    }
+                }
+                else if (type == "pmi")
+                {
+                    var e = userData.bigramMatrix.GetColumn("pmi_sentence").Select(kvp => (kvp.Key, userData.pmiCalc.PMILambda(kvp.Key.Item1, kvp.Key.Item2, lambda))).Where(kvp => kvp.Item2 < max).OrderByDescending(x => x.Item2).GetEnumerator();
+                    int i = 0;
+                    while (i++ < num && e.MoveNext())
+                    {
+                        responseBuilder.Append(e.Current.Key).Append(" - ").Append(e.Current.Item2);
+                        responseBuilder.AppendLine();
+                    }
+                }
+                else
+                {
+                    var e = userData.unigramMatrix.GetColumn("all").OrderByDescending(kvp => kvp.Value).GetEnumerator();
+                    int i = 0;
+                    while (i++ < num && e.MoveNext())
+                    {
+                        responseBuilder.Append(e.Current.Key).Append(" - ").Append(e.Current.Value);
+                        responseBuilder.AppendLine();
+                    }
+                }
             }
-        }
 
-        [Command("topic3")]
-        public async Task Topic3TalkAsync(string word,
-            [Summary("The (optional) user to mimic")]
-            SocketUser user = null)
-        {
-            var userInfo = user ?? Context.Client.CurrentUser;
-
-            MarkovChain markov = MimicCommandHandler._instance.movieScriptMarkov;
-            if (MimicCommandHandler._instance.GetConsentualUser(userInfo.Id, out CustomUserData userData))
-            {
-                markov = userData.doubleWordChain;
-            }
-
-            string message = markov.GenerateSequenceMiddleOut(word, r, r.Next(25, 180));
-            if (string.IsNullOrEmpty(message))
-            {
-                await ReplyAsync($"Oh no, I could not generate with: {word}");
-            }
-            else
-            {
-                message = markov.ReplaceVariables(message, r, new List<string> { Context.User.Mention });
-                await ReplyAsync(message);
-            }
+            await ReplyAsync(responseBuilder.ToString());
         }
 
         [Command("saveMimics", true)]
@@ -169,9 +254,7 @@ namespace Luna
         {
             if (CommandManager._instance.AllUserData.TryGetValue(Context.User.Id, out CustomUserData userData))
             {
-                userData.nGramChain.ClearData();
-                userData.wordChain.ClearData();
-                userData.doubleWordChain.ClearData();
+                userData.ClearData();
                 await ReplyAsync("Done!");
             }
             else
@@ -191,13 +274,24 @@ namespace Luna
             await Context.Channel.SendFileAsync(MimicCommandHandler._instance.GetAvatar(MimicCommandHandler._instance.GetNumHoursForAvatar()));
         }
 
-        [Command("specialCommand", true)]
-        public async Task SpecialCommand()
+        [Command("succCorpses", true)]
+        public async Task SpecialCommand1()
+        {
+            if (Context.User.Id == 295009962709614593ul)
+            {
+                await MimicCommandHandler._instance.SaveOldMessages(Context);
+            }
+            else
+            {
+                await ReplyAsync($"{Context.User.Mention}, you are not granted access to this command");
+            }
+        }
+        [Command("absorbSoles", true)]
+        public async Task SpecialCommand2()
         {
             if (Context.User.Id == 295009962709614593ul)
             {
                 await MimicCommandHandler._instance.InputOldMessages(Context);
-                //await MimicCommandHandler._instance.SaveOldMessages(Context);
             }
             else
             {
