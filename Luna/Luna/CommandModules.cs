@@ -38,6 +38,34 @@ namespace Luna
             }
         }
 
+        [Command("lookup")]
+        public async Task Lookup([Remainder]string lookup)
+        {
+            List<WikiMarkupParser> results = await MimicCommandHandler.WikiLookup(lookup);
+
+            EmbedBuilder embedBuilder = new EmbedBuilder();
+            foreach (var result in results)
+            {
+                if (result.ContentCount > 0)
+                {
+                    StringBuilder builder = new StringBuilder();
+                    for (int i = 0; i < result.ContentCount; i++)
+                    {
+                        builder.AppendLine(WikiMarkupParser.Format(result[i], "https://en.wikipedia.org/wiki/", "[{{TEXT}}]({{LINK}})")).AppendLine();
+                    }
+                    string description = builder.ToString();
+                    if (description.Length > 1024)
+                    {
+                        description = description.Substring(0, 1021) + "...";
+                    }
+                    embedBuilder.AddField("Wikipedia", $"[link](https://en.wikipedia.org/wiki/{lookup.Replace(" ", "_")})");
+                    embedBuilder.AddField(lookup, description);
+                }
+            }
+
+            await ReplyAsync(embed: embedBuilder.Build());
+        }
+
         //[Command("topic")]
         //public async Task TopicTalkAsync(string word,
         //    [Summary("The (optional) user to mimic")]

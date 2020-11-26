@@ -20,6 +20,9 @@ using Luna.Sentiment;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using LingK;
+using WikiClientLibrary.Client;
+using WikiClientLibrary.Sites;
+using Microsoft.Extensions.Logging;
 
 namespace Luna
 {
@@ -955,7 +958,8 @@ namespace Luna
                     }
 
                     // What's XXX => Wikipedia search
-                    Regex whatIsRegex = new Regex(@"^((what'?s|what is|what'?re|what are) (?<lookup>.+)\??)$");
+                    Regex whatIsRegex = new Regex(@"^(?<luna>luna |[^\s]+ )?((what'?s|what is|what'?re|what are|who is|who are)( a)? (?<lookup>[^?]+)\??)$");
+                    Match whatIsMatch = whatIsRegex.Match(message.Content.ToLowerInvariant());
                     // Chicken Butt
                     Regex chickenButWhatsUpRegex = new Regex(@"^((what'?s|what is) up\??)$");
                     if (chickenButWhatsUpRegex.IsMatch(message.Content.ToLowerInvariant()) && r.NextDouble() < 0.70)
@@ -963,9 +967,29 @@ namespace Luna
                         var context = new SocketCommandContext(_client, message);
                         await context.Channel.SendMessageAsync("Chicken Butt");
                     }
-                    else if (whatIsRegex.IsMatch(message.Content.ToLowerInvariant()))
+                    else if (whatIsMatch.Success && (!whatIsMatch.Groups["luna"].Success || whatIsMatch.Groups["luna"].Value.Contains(_client.CurrentUser.Id.ToString())))
                     {
-                        //TODO: wikipedia search
+                        string lookup = whatIsMatch.Groups["lookup"].Value;
+
+                        List<WikiMarkupParser> results = await WikiLookup(lookup);
+
+                        foreach (var result in results)
+                        {
+                            string description = result.GetHeader("short description")?.headerValue;
+
+                            if (string.IsNullOrEmpty(description) && result.ContentCount > 0)
+                            {
+                                description = WikiMarkupParser.Format(result[0]);
+                            }
+
+                            if (!string.IsNullOrEmpty(description) && !description.StartsWith('#'))
+                            {
+                                var context2 = new SocketCommandContext(_client, message);
+                                await context2.Channel.SendMessageAsync(description);
+                            }
+                        }
+
+                        return;
                     }
 
 
@@ -1337,6 +1361,48 @@ namespace Luna
                 Console.WriteLine(e.Message);
                 return null;
             }
+        }
+        public static async Task<List<WikiMarkupParser>> WikiLookup(string lookup)
+        {
+            List<WikiMarkupParser> results = new List<WikiMarkupParser>();
+
+            string url = "https://" + $"en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content&rvsection=0&rvslots=*&format=json&titles={lookup}";
+            try
+            {
+                HttpResponseMessage response = await _httpClient.GetAsync(url);
+
+                ILoggerFactory loggerFactory = new LoggerFactory();
+                ILogger logger = loggerFactory.CreateLogger("wiki_log");
+                CancellationToken cancellationToken = new CancellationToken();
+
+                JToken token = await MediaWikiJsonResponseParser.Default.ParseResponseAsync(response, new WikiResponseParsingContext(logger, cancellationToken));
+                Console.WriteLine(token.ToString());
+
+                JToken pages = token["query"]?["pages"];
+                foreach (JProperty page in pages)
+                {
+                    JArray revisions = (page.Value["revisions"] as JArray);
+                    if (revisions != null)
+                    {
+                        foreach (JToken rev in revisions)
+                        {
+                            JToken main = rev["slots"]?["main"];
+                            Console.WriteLine(main["contentformat"]);
+                            Console.WriteLine(main["*"]);
+
+                            WikiMarkupParser wikiMarkupParser = new WikiMarkupParser();
+                            wikiMarkupParser.Load(main["*"].Value<string>());
+                            results.Add(wikiMarkupParser);
+                        }
+                    }
+                }
+            }
+            catch (HttpRequestException e)
+            {
+                Console.WriteLine(e.Message);
+            }
+
+            return results;
         }
     }
 }
