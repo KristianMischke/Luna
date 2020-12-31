@@ -921,8 +921,7 @@ namespace Luna
                     }
 
                     // What's XXX => Wikipedia search
-                    Regex whatIsRegex = new Regex(@"^(?<luna>luna |[^\s]+ )?((what'?s|what is|what'?re|what are|who is|who are)( a)? (?<lookup>[^?]+)\??)$");
-                    Match whatIsMatch = whatIsRegex.Match(message.Content.ToLowerInvariant());
+                    string wikiLookupTerm = WikiLookupTerm(message);
                     // Chicken Butt
                     Regex chickenButWhatsUpRegex = new Regex(@"^((what'?s|what is) up\??)$");
                     if (chickenButWhatsUpRegex.IsMatch(message.Content.ToLowerInvariant()) && r.NextDouble() < 0.70)
@@ -930,29 +929,9 @@ namespace Luna
                         var context = new SocketCommandContext(_client, message);
                         await context.Channel.SendMessageAsync("Chicken Butt");
                     }
-                    else if (whatIsMatch.Success && (!whatIsMatch.Groups["luna"].Success || whatIsMatch.Groups["luna"].Value.Contains(_client.CurrentUser.Id.ToString())))
+                    else if (!string.IsNullOrEmpty(wikiLookupTerm))
                     {
-                        string lookup = whatIsMatch.Groups["lookup"].Value;
-
-                        List<WikiMarkupParser> results = await WikiLookup(lookup);
-
-                        foreach (var result in results)
-                        {
-                            string description = result.GetHeader("short description")?.headerValue;
-
-                            if (string.IsNullOrEmpty(description) && result.ContentCount > 0)
-                            {
-                                description = WikiMarkupParser.Format(result[0]);
-                            }
-
-                            if (!string.IsNullOrEmpty(description) && !description.StartsWith('#'))
-                            {
-                                var context2 = new SocketCommandContext(_client, message);
-                                await context2.Channel.SendMessageAsync(description);
-                            }
-                        }
-
-                        return;
+                        await message.AddReactionAsync(new Emoji("\u2754"));// ❔
                     }
 
 
@@ -1060,6 +1039,18 @@ namespace Luna
                 await err_context.Channel.SendMessageAsync(err_msg.Substring(0, Math.Min(1000, err_msg.Length)));
                 */
             }
+        }
+
+        public string WikiLookupTerm(IMessage message)
+        {
+            Regex whatIsRegex = new Regex(@"^(?<luna>luna |[^\s]+ )?((what'?s|what is|what'?re|what are|who is|who are)( a)? (?<lookup>[^?]+)\??)$");
+            Match whatIsMatch = whatIsRegex.Match(message.Content.ToLowerInvariant());
+            if (whatIsMatch.Success && (!whatIsMatch.Groups["luna"].Success || whatIsMatch.Groups["luna"].Value.Contains(_client.CurrentUser.Id.ToString())))
+            {
+                return whatIsMatch.Groups["lookup"].Value;
+            }
+
+            return null;
         }
 
         private async void UpdateStatus(MoodProfile lastMoodProfile)
@@ -1302,6 +1293,35 @@ namespace Luna
                         }
                     }
                 }
+            }
+            else
+            {
+
+                if (message.Author.Id != _client.CurrentUser.Id && reaction.UserId != _client.CurrentUser.Id && reaction.Emote.Equals(new Emoji("\u2754"))) // ❔
+                {
+                    // WIKI LOOKUP
+                    string wikiLookupTerm = WikiLookupTerm(message);
+                    if (!string.IsNullOrEmpty(wikiLookupTerm))
+                    {
+                        List<WikiMarkupParser> results = await WikiLookup(wikiLookupTerm);
+
+                        foreach (var result in results)
+                        {
+                            string description = result.GetHeader("short description")?.headerValue;
+
+                            if (string.IsNullOrEmpty(description) && result.ContentCount > 0)
+                            {
+                                description = WikiMarkupParser.Format(result[0]);
+                            }
+
+                            if (!string.IsNullOrEmpty(description) && !description.StartsWith('#'))
+                            {
+                                await channel.SendMessageAsync(description);
+                            }
+                        }
+                    }
+                }
+
             }
         }
 
