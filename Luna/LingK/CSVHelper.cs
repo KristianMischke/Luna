@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace LingK
 {
-    class CSVReader
+    public class CSVReader
     {
         TextReader reader;
         char separator;

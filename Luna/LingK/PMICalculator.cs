@@ -13,18 +13,18 @@ namespace LingK
      */
     public class PMICalculator
     {
-        protected ICoOccurrenceColumn<string, string> counts;
-        protected ICoOccurrenceColumn<(string, string), string> pairCounts;
+        protected ICoOccurrenceColumn<string, string, int> counts;
+        protected ICoOccurrenceColumn<(string, string), string, int> pairCounts;
 
         protected int N => counts.Sum();
         protected int TotalPairCounts => pairCounts.Sum();
 
         public PMICalculator()
         {
-            counts = new CoOccurrenceDict<string>();
-            pairCounts = new CoOccurrenceDict<(string, string)>();
+            counts = new CoOccurrenceDict<string, int>();
+            pairCounts = new CoOccurrenceDict<(string, string), int>();
         }
-        public PMICalculator(ICoOccurrenceColumn<string, string> counts, ICoOccurrenceColumn<(string, string), string> pairCounts)
+        public PMICalculator(ICoOccurrenceColumn<string, string, int> counts, ICoOccurrenceColumn<(string, string), string, int> pairCounts)
         {
             this.counts = counts;
             this.pairCounts = pairCounts;

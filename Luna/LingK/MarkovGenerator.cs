@@ -75,9 +75,9 @@ namespace LingK
         static Regex punctuation = new Regex(@"^[~!@#$%^&*()_+=\-`{}[\]|\\;':""<>?,.\/]+$");
         public static string GenerateWithBackoff(
             Random random,
-            ICoOccurrenceMatrix<string, string> unigramMatrix,
-            ICoOccurrenceMatrix<(string, string), string> bigramMatrix,
-            ICoOccurrenceMatrix<(string, string, string), string> trigramMatrix,
+            UnigramMatrix<int> unigramMatrix,
+            BigramMatrix<int> bigramMatrix,
+            TrigramMatrix<int> trigramMatrix,
             BackoffFunction backoffFunction
             )
         {

@@ -5,20 +5,25 @@ using System.Text;
 
 namespace LingK
 {
+    public interface ILanguageModel
+    {
+        float NaiveLogProb(List<string> words, int laplaceSmoothing = 0, bool padSentence = true);
+    }
+
     public class UnigramModel : NGramModel<string, string>
     {
         public override int N => 1;
 
         public UnigramModel(int oovOccurrenceThreshold = 0)
         {
-            ngramCounts = unigramMap = new CoOccurrenceDict<string>();
-            historyCounts = new CoOccurrenceDict<string>();
+            ngramCounts = unigramMap = new CoOccurrenceDict<string, int>();
+            historyCounts = new CoOccurrenceDict<string, int>();
             Init(oovOccurrenceThreshold);
         }
-        public UnigramModel(ICoOccurrenceColumn<string, string> unigramMap, int oovOccurrenceThreshold = 0)
+        public UnigramModel(ICoOccurrenceColumn<string, string, int> unigramMap, int oovOccurrenceThreshold = 0)
         {
             this.ngramCounts = this.unigramMap = unigramMap;
-            historyCounts = new CoOccurrenceDict<string>();
+            historyCounts = new CoOccurrenceDict<string, int>();
             Init(oovOccurrenceThreshold);
         }
         protected override string GetNGramTuple(List<string> words, int start) => words[start];
@@ -37,12 +42,12 @@ namespace LingK
 
         public BigramModel(int oovOccurrenceThreshold = 0)
         {
-            unigramMap = new CoOccurrenceDict<string>();
-            historyCounts = new CoOccurrenceDict<string>();
-            ngramCounts = new CoOccurrenceDict<(string, string)>();
+            unigramMap = new CoOccurrenceDict<string, int>();
+            historyCounts = new CoOccurrenceDict<string, int>();
+            ngramCounts = new CoOccurrenceDict<(string, string), int>();
             Init(oovOccurrenceThreshold);
         }
-        public BigramModel(ICoOccurrenceColumn<string, string> unigramMap, ICoOccurrenceColumn<(string, string), string> bigramMap, int oovOccurrenceThreshold = 0)
+        public BigramModel(ICoOccurrenceColumn<string, string, int> unigramMap, ICoOccurrenceColumn<(string, string), string, int> bigramMap, int oovOccurrenceThreshold = 0)
         {
             this.unigramMap = unigramMap;
             historyCounts = unigramMap;
@@ -75,18 +80,18 @@ namespace LingK
 
     public class TrigramModel : NGramModel<(string, string, string), (string, string)>
     {
-        public override int N => 2;
+        public override int N => 3;
 
         public TrigramModel(int oovOccurrenceThreshold = 0)
         {
-            unigramMap = new CoOccurrenceDict<string>();
-            historyCounts = new CoOccurrenceDict<(string, string)>();
-            ngramCounts = new CoOccurrenceDict<(string, string, string)>();
+            unigramMap = new CoOccurrenceDict<string, int>();
+            historyCounts = new CoOccurrenceDict<(string, string), int>();
+            ngramCounts = new CoOccurrenceDict<(string, string, string), int>();
             Init(oovOccurrenceThreshold);
         }
-        public TrigramModel(ICoOccurrenceColumn<string, string> unigramMap,
-                            ICoOccurrenceColumn<(string, string), string> bigramMap,
-                            ICoOccurrenceColumn<(string, string, string), string> trigramMap, int oovOccurrenceThreshold = 0)
+        public TrigramModel(ICoOccurrenceColumn<string, string, int> unigramMap,
+                            ICoOccurrenceColumn<(string, string), string, int> bigramMap,
+                            ICoOccurrenceColumn<(string, string, string), string, int> trigramMap, int oovOccurrenceThreshold = 0)
         {
             this.unigramMap = unigramMap;
             historyCounts = bigramMap;
@@ -117,7 +122,7 @@ namespace LingK
         }
     }
 
-    public abstract class NGramModel<TNGramTuple, THistoryTuple>
+    public abstract class NGramModel<TNGramTuple, THistoryTuple> : ILanguageModel
     {
         private struct CacheTypeCountScope : IDisposable
         {
@@ -145,9 +150,9 @@ namespace LingK
         private int oovOccurrenceThreshold;
 
         // counts & count Dictionaries
-        protected ICoOccurrenceColumn<string, string> unigramMap;             // OOV-replaced unigram map
-        protected ICoOccurrenceColumn<TNGramTuple, string> ngramCounts;       // count of N-grams map
-        protected ICoOccurrenceColumn<THistoryTuple, string> historyCounts;   // count of (N-1)-grams history map
+        protected ICoOccurrenceColumn<string, string, int> unigramMap;             // OOV-replaced unigram map
+        protected ICoOccurrenceColumn<TNGramTuple, string, int> ngramCounts;       // count of N-grams map
+        protected ICoOccurrenceColumn<THistoryTuple, string, int> historyCounts;   // count of (N-1)-grams history map
 
         public abstract int N { get; }
         public int NumSentences() { return unigramMap[EOS]; }
@@ -195,13 +200,14 @@ namespace LingK
             modelFrozen = true;
         }
 
-        private void AddSentence(List<string> sentence)
+        private void AddSentence(List<string> sentence, bool padSentence = true)
         {
             if (modelFrozen)
                 return; // TODO: warning msg
 
             ReplaceOOV(sentence);
-            PadSentence(sentence);
+            if(padSentence)
+                PadSentence(sentence);
 
             foreach (string token in sentence) unigramMap[token]++;
 
@@ -274,11 +280,12 @@ namespace LingK
         }
 
         // assumes model has been trained
-        public float NaiveLogProb(List<string> sentence)
+        public float NaiveLogProb(List<string> sentence, int laplaceSmoothing = 0, bool padSentence = true)
         {
             List<string> copy = new List<string>(sentence);
             ReplaceOOV(copy);
-            PadSentence(copy);
+            if (padSentence)
+                PadSentence(copy);
 
             float total = 0;
             using (new CacheTypeCountScope(this, true))
@@ -286,7 +293,7 @@ namespace LingK
                 for (int i = 0; i < copy.Count - N + 1; i++)
                 {
                     TNGramTuple ngram = GetNGramTuple(copy, i);
-                    total += (float)Math.Log(P(ngram));
+                    total += (float)Math.Log(P(ngram, laplaceSmoothing));
                 }
             }
 
@@ -294,7 +301,7 @@ namespace LingK
         }
 
         // assumes model has been trained
-        public float Perplexity(IEnumerable<IEnumerable<string>> corpus)
+        public float Perplexity(IEnumerable<IEnumerable<string>> corpus, bool padSentences = true)
         {
             Dictionary<TNGramTuple, int> corpusCounts = new Dictionary<TNGramTuple, int>();
             int totalCounts = 0;
@@ -302,7 +309,8 @@ namespace LingK
             {
                 List<string> copy = new List<string>(sentence);
                 ReplaceOOV(copy);
-                PadSentence(copy);
+                if (padSentences)
+                    PadSentence(copy);
                 for (int i = 0; i < copy.Count - N; i++)
                 {
                     TNGramTuple key = GetNGramTuple(copy, i);

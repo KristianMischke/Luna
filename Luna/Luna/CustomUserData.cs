@@ -22,9 +22,9 @@ namespace Luna
         public readonly ulong pId;
 
         public List<string> linkList;
-        public CoOccurrenceMatrix<string, string> unigramMatrix;
-        public CoOccurrenceMatrix<(string, string), string> bigramMatrix;
-        public CoOccurrenceMatrix<(string, string, string), string> trigramMatrix;
+        public UnigramMatrix<int> unigramMatrix;
+        public BigramMatrix<int> bigramMatrix;
+        public TrigramMatrix<int> trigramMatrix;
         public PMICalculator pmiCalc;
 
         public bool TrackMe { get { return (bool)(data["tracking"] ?? false); } set { data["tracking"] = value; } }
@@ -33,27 +33,14 @@ namespace Luna
 
         public JObject data;
 
-        Regex bigramRegex = new Regex(@"^\((?<Item1>((?!, ).)*), (?<Item2>((?!, ).)*)\)$");
-        private (string, string) ParseBigram(string value)
-        {
-            Match m = bigramRegex.Match(value);
-            return (m.Groups["Item1"].Value, m.Groups["Item2"].Value);
-        }
-        Regex trigramRegex = new Regex(@"^\((?<Item1>((?!, ).)*), (?<Item2>((?!, ).)*), (?<Item3>((?!, ).)*)\)$");
-        private (string, string, string) ParseTrigram(string value)
-        {
-            Match m = trigramRegex.Match(value);
-            return (m.Groups["Item1"].Value, m.Groups["Item2"].Value, m.Groups["Item3"].Value);
-        }
-
         public CustomUserData(ulong pId)
         {
             this.pId = pId;
 
             linkList = new List<string>();
-            unigramMatrix = new CoOccurrenceMatrix<string, string>(row => row, row => row, col => col, col => col);
-            bigramMatrix = new CoOccurrenceMatrix<(string, string), string>(row => row.ToString(), ParseBigram, col => col, col => col);
-            trigramMatrix = new CoOccurrenceMatrix<(string, string, string), string>(row => row.ToString(), ParseTrigram, col => col, col => col);
+            unigramMatrix = new UnigramMatrix<int>(BasicTokenizer.Identity, BasicTokenizer.Identity, BasicTokenizer.Identity, BasicTokenizer.Identity);
+            bigramMatrix = new BigramMatrix<int>(row => row.ToString(), BasicTokenizer.ParseBigram, BasicTokenizer.Identity, BasicTokenizer.Identity);
+            trigramMatrix = new TrigramMatrix<int>(row => row.ToString(), BasicTokenizer.ParseTrigram, BasicTokenizer.Identity, BasicTokenizer.Identity);
             pmiCalc = new PMICalculator(unigramMatrix.GetColumn("all"), bigramMatrix.GetColumn("pmi_sentence"));
 
             mood = new MoodProfile();

@@ -25,6 +25,21 @@ namespace LingK
         private static readonly Regex numberPlaceholderRegex = new Regex(NUMBER_GRAM_PATTERN);
         private static readonly Regex splitAndLinkRegex = new Regex($"(<:\\w+:\\d+>)|{LINK_PATTERN}|({USER_GRAM})|{NUMBER_PATTERN}|{SPLIT_PATTERN}");
 
+        public static T Identity<T>(T value) => value;
+
+        static Regex bigramRegex = new Regex(@"^\((?<Item1>((?!, ).)*), (?<Item2>((?!, ).)*)\)$");
+        public static (string, string) ParseBigram(string value)
+        {
+            Match m = bigramRegex.Match(value);
+            return (m.Groups["Item1"].Value, m.Groups["Item2"].Value);
+        }
+        static Regex trigramRegex = new Regex(@"^\((?<Item1>((?!, ).)*), (?<Item2>((?!, ).)*), (?<Item3>((?!, ).)*)\)$");
+        public static (string, string, string) ParseTrigram(string value)
+        {
+            Match m = trigramRegex.Match(value);
+            return (m.Groups["Item1"].Value, m.Groups["Item2"].Value, m.Groups["Item3"].Value);
+        }
+
         public static List<string> Tokenize(string text, List<string> outLinks = null)
         {
             if (text == null)
@@ -55,7 +70,7 @@ namespace LingK
         }
 
         //maybe not best place for this
-        public static void LoadGramHelper(List<string> tokens, string column, bool includeSpaceUnigram, ICoOccurrenceMatrix<string, string> unigramMatrix, ICoOccurrenceMatrix<(string, string), string> bigramMatrix, ICoOccurrenceMatrix<(string,string,string), string> trigramMatrix)
+        public static void LoadGramHelper(List<string> tokens, string column, bool includeSpaceUnigram, ICoOccurrenceMatrix<string, string, int> unigramMatrix, ICoOccurrenceMatrix<(string, string), string, int> bigramMatrix, ICoOccurrenceMatrix<(string,string,string), string, int> trigramMatrix)
         {
             List<string> tokensCopy = new List<string>(tokens);
 

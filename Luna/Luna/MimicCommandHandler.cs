@@ -37,10 +37,12 @@ namespace Luna
         public const string MOVIE_QUOTE_MARKOV_SAVE = "/moviequote_markov.json";
 
         // mood & sentiment
-        public Dictionary<string, WordEmotion> andbrainWordDB = new Dictionary<string, WordEmotion>();
-        public Dictionary<string, WordEmotion> textEmotionDB = new Dictionary<string, WordEmotion>();
-        public Dictionary<string, HedonometerEntry> hedonometerDB = new Dictionary<string, HedonometerEntry>();
-        public Dictionary<string, float> militaryWordDB = new Dictionary<string, float>();
+        public UnigramMatrix<float> moodSentimentMatrix = new UnigramMatrix<float>(BasicTokenizer.Identity, BasicTokenizer.Identity, BasicTokenizer.Identity, BasicTokenizer.Identity);
+        
+        public UnigramMatrix<int> unigramEmotion = new UnigramMatrix<int>(BasicTokenizer.Identity, BasicTokenizer.Identity, BasicTokenizer.Identity, BasicTokenizer.Identity);
+        public BigramMatrix<int> bigramEmotion = new BigramMatrix<int>(row => row.ToString(), BasicTokenizer.ParseBigram, BasicTokenizer.Identity, BasicTokenizer.Identity);
+        public TrigramMatrix<int> trigramEmotion = new TrigramMatrix<int>(row => row.ToString(), BasicTokenizer.ParseTrigram, BasicTokenizer.Identity, BasicTokenizer.Identity);
+        public NaiveBayesClassifier emotionClassifier = new NaiveBayesClassifier(); //TODO: backoff classifier?
         public MoodProfile moodProfile = new MoodProfile();
         public bool markMood = false;
 
@@ -93,6 +95,7 @@ namespace Luna
             _instance = this;
 
             _client.Disconnected += e => Task.Factory.StartNew(() => SaveMimicData());
+            printLogMessage = true;
         }
 
         public bool GetConsentualUser(ulong id, out CustomUserData userData)
@@ -332,7 +335,70 @@ namespace Luna
 
         public async Task SetupAsync()
         {
+            await _client.SetGameAsync("Setup", null, ActivityType.Playing);
+
             _rwSemaphore.WaitOne();
+
+            if (!Directory.Exists(UsersDirectory))
+            {
+                Directory.CreateDirectory(UsersDirectory);
+            }
+
+            if (Directory.Exists(Path.Combine(UsersDirectory, "luna")))
+            {
+                await LunasUser.LoadDataAsync(Path.Combine(UsersDirectory, "luna"));
+            }
+            if (File.Exists(MimicDirectory + "/bot_data.json"))
+            {
+                using (StreamReader reader = new StreamReader(MimicDirectory + "/bot_data.json"))
+                {
+                    JObject data = await JObject.LoadAsync(new JsonTextReader(reader));
+                    moodProfile.LoadJson((JObject)data["mood"]);
+
+                    if (data.Property("lastAvatarUpdate") != null)
+                    {
+                        lastAvatarSetDate = DateTime.Parse((string)data["lastAvatarUpdate"]);
+                    }
+                }
+            }
+
+            string[] userDirs = Directory.GetDirectories(UsersDirectory);
+            foreach (string file in userDirs)
+            {
+                string fileName = Path.GetFileNameWithoutExtension(file);
+                if (ulong.TryParse(fileName, out ulong id))
+                {
+                    if (!AllUserData.TryGetValue(id, out CustomUserData playerData))
+                    {
+                        playerData = AllUserData[id] = new CustomUserData(id);
+                    }
+
+                    try { await playerData.LoadDataAsync(file); }
+                    catch (FileNotFoundException) { }
+                    catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
+                }
+            }
+
+            if (File.Exists(MimicDirectory + "/" + USER_TRACK_FILE))
+            {
+                using (StreamReader sr = new StreamReader(MimicDirectory + "/" + USER_TRACK_FILE))
+                {
+                    string line;
+                    do
+                    {
+                        line = await sr.ReadLineAsync();
+                        if (ulong.TryParse(line, out ulong id))
+                        {
+                            if (!AllUserData.TryGetValue(id, out CustomUserData playerData))
+                            {
+                                playerData = AllUserData[id] = new CustomUserData(id);
+                            }
+
+                            playerData.TrackMe = true;
+                        }
+                    } while (line != null);
+                }
+            }
 
             {
                 using (StreamReader sr = new StreamReader(MimicDirectory + "/error_messages.txt"))
@@ -408,133 +474,73 @@ namespace Luna
                 }
             }
 
-            // emotional word dataset
-            WordEmotion.LoadAsync(MimicDirectory + "/Andbrain/Andbrain_DataSet.csv", andbrainWordDB);
 
-            // hedonometer word sentiment dataset
-            HedonometerEntry.LoadAsync(MimicDirectory + "/hedonometer/Hedonometer.csv", hedonometerDB);
+            { // load mood files
+                moodSentimentMatrix.Clear();
 
-            {
-                if (File.Exists(MimicDirectory + "/SentimentAnalysisInText/text_emotion_processed.csv"))
+                // emotional word dataset
+                moodSentimentMatrix.Load(MimicDirectory + "/Andbrain/Andbrain_DataSet.csv", delimeter: ',', modifyHeader: (x) => $"andbrain_{x}");
+                //WordEmotion.LoadAsync(MimicDirectory + "/Andbrain/Andbrain_DataSet.csv", andbrainWordDB);
+
+                // hedonometer word sentiment dataset
+                moodSentimentMatrix.Load(MimicDirectory + "/hedonometer/Hedonometer.csv", delimeter: ',', modifyHeader: (x) => $"hedonometer_{x}", rowKeyColumn:"Word");
+                //HedonometerEntry.LoadAsync(MimicDirectory + "/hedonometer/Hedonometer.csv", hedonometerDB);
+
+                 // military terms
+                if (File.Exists(MimicDirectory + "/military_terms.txt"))
                 {
-                    WordEmotion.LoadAsync(MimicDirectory + "/SentimentAnalysisInText/text_emotion_processed.csv", textEmotionDB);
-                }
-                else if (!File.Exists(MimicDirectory + "/SentimentAnalysisInText/text_emotion_processed.csv") && File.Exists(MimicDirectory + "/SentimentAnalysisInText/text_emotion.csv"))
-                {
-                    Regex cleanup = new Regex("(https?://[\\w./]+|@[\\w]+|[^a-z- '*])+");
-                    HashSet<string> emotions = new HashSet<string>();
-                    Dictionary<string, int> wordCounts = new Dictionary<string, int>();
-                    Dictionary<string, Dictionary<string, float>> wordVectors = new Dictionary<string, Dictionary<string, float>>();
-                    using (StreamReader sr = new StreamReader(MimicDirectory + "/SentimentAnalysisInText/text_emotion.csv"))
-                    {
-                        int i = 0;
-                        string line;
-                        do
-                        {
-                            line = await sr.ReadLineAsync();
-                            string[] entry = line?.Split(',');
-                            if (i > 0 && entry != null && entry.Length == 4)////
-                            {
-                                string emotion = entry[1].Trim('\"');
-                                if (emotion == "happiness") emotion = "happy";
-                                if (emotion == "sadness") emotion = "sad";
-
-                                string sentence = entry[3].Trim('\"');
-                                if (_symSpell != null)
-                                {
-                                    List<SymSpell.SuggestItem> suggestions = _symSpell.LookupCompound(sentence, 2);
-                                    sentence = suggestions[0].term;
-                                }
-                                string[] words = cleanup.Replace(sentence, " ").Replace("'", "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-
-                                emotions.Add(emotion);
-
-                                foreach (string word in words)
-                                {
-                                    if (wordCounts.ContainsKey(word))
-                                    {
-                                        wordCounts[word]++;
-                                    }
-                                    else
-                                    {
-                                        wordCounts[word] = 1;
-                                    }
-                                    if (!wordVectors.TryGetValue(word, out Dictionary<string, float> vector))
-                                    {
-                                        vector = wordVectors[word] = new Dictionary<string, float>();
-                                    }
-                                    if (vector.ContainsKey(emotion))
-                                    {
-                                        vector[emotion]++;
-                                    }
-                                    else
-                                    {
-                                        vector[emotion] = 1;
-                                    }
-                                }
-                            }
-                            i++;
-                        } while (line != null);
-                    }
-                    using (StreamWriter sw = new StreamWriter(MimicDirectory + "/SentimentAnalysisInText/text_emotion_processed.csv"))
-                    {
-                        List<string> emotion_ordered = emotions.ToList();
-
-                        // header
-                        await sw.WriteAsync("word");
-                        foreach (string emotion in emotion_ordered)
-                        {
-                            await sw.WriteAsync($",{emotion}");
-                        }
-                        await sw.WriteAsync('\n');
-
-                        foreach (KeyValuePair<string, Dictionary<string, float>> kvp in wordVectors)
-                        {
-                            if (wordCounts[kvp.Key] > 10)
-                            {
-                                await sw.WriteAsync(kvp.Key);
-                                foreach (string emotion in emotion_ordered)
-                                {
-                                    if (kvp.Value.ContainsKey(emotion))
-                                    {
-                                        kvp.Value[emotion] /= wordCounts[kvp.Key];
-                                    }
-                                    else
-                                    {
-                                        kvp.Value[emotion] = 0;
-                                    }
-                                    await sw.WriteAsync($",{kvp.Value[emotion]}");
-                                }
-                                await sw.WriteAsync('\n');
-                            }
-                        }
-                    }
+                    moodSentimentMatrix.Load(MimicDirectory + "/military_terms.txt", delimeter: ':', overrideHeader: new List<string>() { "word", "military" }, defaultValue: 0.05f);
                 }
             }
 
-            { // military terms
-                if (File.Exists(MimicDirectory + "/military_terms.txt"))
+            { // load or generate emotion n-gram model
+                string unigramEmotionFile = MimicDirectory + "/SentimentAnalysisInText/unigram.tsv";
+                string bigramEmotionFile = MimicDirectory + "/SentimentAnalysisInText/bigram.tsv";
+                string trigramEmotionFile = MimicDirectory + "/SentimentAnalysisInText/trigram.tsv";
+
+                if (File.Exists(unigramEmotionFile) && File.Exists(bigramEmotionFile) && File.Exists(trigramEmotionFile))
                 {
-                    using (StreamReader sr = new StreamReader(MimicDirectory + "/military_terms.txt"))
+                    unigramEmotion.Load(unigramEmotionFile);
+                    bigramEmotion.Load(bigramEmotionFile);
+                    trigramEmotion.Load(trigramEmotionFile);
+                }
+                else if (File.Exists(MimicDirectory + "/SentimentAnalysisInText/text_emotion.csv"))
+                {
+                    Regex twitterMention = new Regex("@[\\w]+");
+
+                    using (StreamReader reader = new StreamReader(MimicDirectory + "/SentimentAnalysisInText/text_emotion.csv"))
                     {
-                        string line;
-                        do
+                        CSVReader csvReader = new CSVReader(reader, ',');
+
+                        List<string> header = csvReader.ReadRow();
+                        int sentimentCol = header.IndexOf("sentiment");
+                        int textCol = header.IndexOf("content");
+
+                        List<string> row;
+                        while ((row = csvReader.ReadRow()).Count > 0)
                         {
-                            line = await sr.ReadLineAsync();
-                            string[] entry = line?.Split(':');
-                            if (entry != null)
-                            {
-                                if (entry.Length == 2)
-                                {
-                                    militaryWordDB.TryAdd(entry[0], float.Parse(entry[1]));
-                                }
-                                else
-                                {
-                                    militaryWordDB.TryAdd(line, 0.05f);
-                                }
-                            }
-                        } while (line != null);
+                            string message = PreProcessUserMessage(row[textCol], null);
+                            message = twitterMention.Replace(message, BasicTokenizer.USER_GRAM);
+
+                            List<string> tokens = BasicTokenizer.Tokenize(message);
+                            BasicTokenizer.LoadGramHelper(tokens, row[sentimentCol], false, unigramEmotion, bigramEmotion, trigramEmotion);
+                        }
                     }
+
+                    unigramEmotion.Save(unigramEmotionFile);
+                    bigramEmotion.Save(bigramEmotionFile);
+                    trigramEmotion.Save(trigramEmotionFile);
+                }
+
+                emotionClassifier = new NaiveBayesClassifier();
+                int totalSentences = 0;
+                foreach (var sentiment in trigramEmotion.GetColumnKeys())
+                {
+                    totalSentences += unigramEmotion[BasicTokenizer.END_GRAM, sentiment];
+                }
+                foreach (var sentiment in trigramEmotion.GetColumnKeys())
+                {
+                    emotionClassifier.AddLanguageModel(sentiment, new TrigramModel(unigramEmotion.GetColumn(sentiment), bigramEmotion.GetColumn(sentiment), trigramEmotion.GetColumn(sentiment), 5), unigramEmotion[BasicTokenizer.END_GRAM, sentiment] / (float)totalSentences);
                 }
             }
 
@@ -570,70 +576,10 @@ namespace Luna
                 }
             }
             _markovSemaphore.Release();
-
-            if (!Directory.Exists(UsersDirectory))
-            {
-                Directory.CreateDirectory(UsersDirectory);
-            }
-
-            if (Directory.Exists(Path.Combine(UsersDirectory, "luna")))
-            {
-                await LunasUser.LoadDataAsync(Path.Combine(UsersDirectory, "luna"));
-            }
-            if (File.Exists(MimicDirectory + "/bot_data.json"))
-            {
-                using (StreamReader reader = new StreamReader(MimicDirectory + "/bot_data.json"))
-                {
-                    JObject data = await JObject.LoadAsync(new JsonTextReader(reader));
-                    moodProfile.LoadJson((JObject)data["mood"]);
-
-                    if (data.Property("lastAvatarUpdate") != null)
-                    {
-                         lastAvatarSetDate = DateTime.Parse((string)data["lastAvatarUpdate"]);
-                    }
-                }
-            }
-
-            string[] userDirs = Directory.GetDirectories(UsersDirectory);
-            foreach (string file in userDirs)
-            {
-                string fileName = Path.GetFileNameWithoutExtension(file);
-                if (ulong.TryParse(fileName, out ulong id))
-                {
-                    if (!AllUserData.TryGetValue(id, out CustomUserData playerData))
-                    {
-                        playerData = AllUserData[id] = new CustomUserData(id);
-                    }
-
-                    try { await playerData.LoadDataAsync(file); }
-                    catch (FileNotFoundException) { }
-                    catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
-                }
-            }
-
-            if (File.Exists(MimicDirectory + "/" + USER_TRACK_FILE))
-            {
-                using (StreamReader sr = new StreamReader(MimicDirectory + "/" + USER_TRACK_FILE))
-                {
-                    string line;
-                    do
-                    {
-                        line = await sr.ReadLineAsync();
-                        if (ulong.TryParse(line, out ulong id))
-                        {
-                            if (!AllUserData.TryGetValue(id, out CustomUserData playerData))
-                            {
-                                playerData = AllUserData[id] = new CustomUserData(id);
-                            }
-
-                            playerData.TrackMe = true;
-                        }
-                    } while (line != null);
-                }
-            }
             _rwSemaphore.Release();
 
             StartBGThread();
+            UpdateStatus(null);
         }
 
         private void StartBGThread()
@@ -933,6 +879,23 @@ namespace Luna
                         return;
                     }
 
+                    // HI response
+                    Regex hiRegex = new Regex(@"^(h+i+|h+e+y+|h+e+l+o+) (?<predicate>([^\s]+( [^\s]+)?))$");
+                    Match hiMatch = hiRegex.Match(message.Content.ToLowerInvariant());
+                    if (hiMatch.Success && hiMatch.Groups["predicate"].Success && r.NextDouble() < 0.8)
+                    {
+                        var context = new SocketCommandContext(_client, message);
+                        await context.Channel.SendMessageAsync($"I'M LUNA");
+                    }
+
+                    // Phrasing 1.0 response
+                    Regex phrasingRegex = new Regex(@"((i'?m|he'?s|she'?s|they'?re|i am|he is|she is|they are) c+o+m+i+n+g+|c+o+m+e+ o+n+)");
+                    Match phrasingMatch = phrasingRegex.Match(message.Content.ToLowerInvariant());
+                    if (phrasingMatch.Success && r.NextDouble() < 0.8)
+                    {
+                        await message.AddReactionAsync(Emote.Parse("<:phrasing:758047809432977549>"));
+                    }
+
                     // Dad Joke
                     Regex imDadRegex = new Regex(@"^([^\s]+ )?(i'?m|i am) (?<predicate>([^\s]+( [^\s]+)?))$");
                     Match dadMatch = imDadRegex.Match(message.Content.ToLowerInvariant());
@@ -1068,15 +1031,7 @@ namespace Luna
                             userData.mood.Mix(messageMood, (float) r.NextDouble());
                         }
 
-                        string newMood = moodProfile.GetPrimaryMood();
-                        if (newMood != lastMoodProfile.GetPrimaryMood() && statusByMood.TryGetValue(newMood,
-                            out List<(string status, ActivityType activity)> statuses))
-                        {
-                            Console.WriteLine("New Mood: " + newMood);
-                            var newStatus = statuses[r.Next(statuses.Count)];
-
-                            await _client.SetGameAsync(newStatus.status, null, newStatus.activity);
-                        }
+                        UpdateStatus(lastMoodProfile);
 
                         if (markMood && moodEmoji.TryGetValue(messageMood.GetPrimaryMood(), out List<IEmote> emoji))
                         {
@@ -1104,6 +1059,19 @@ namespace Luna
                 string err_msg = e.ToString();
                 await err_context.Channel.SendMessageAsync(err_msg.Substring(0, Math.Min(1000, err_msg.Length)));
                 */
+            }
+        }
+
+        private async void UpdateStatus(MoodProfile lastMoodProfile)
+        {
+            string newMood = moodProfile.GetPrimaryMood();
+            if ((lastMoodProfile == null || newMood != lastMoodProfile.GetPrimaryMood())
+                && statusByMood.TryGetValue(newMood, out List<(string status, ActivityType activity)> statuses))
+            {
+                Console.WriteLine("New Mood: " + newMood);
+                var newStatus = statuses[r.Next(statuses.Count)];
+
+                await _client.SetGameAsync(newStatus.status, null, newStatus.activity);
             }
         }
 
@@ -1224,26 +1192,27 @@ namespace Luna
             for(int i = 0; i < words.Length; i++)
             {
                 string word = words[i].ToLower().Trim().Trim('.').Trim('\"').Trim(',').Trim('?').Trim('!').Trim(':').Trim(';');
-                if (andbrainWordDB.TryGetValue(word, out WordEmotion emotion))
+                var matrixRow = moodSentimentMatrix.GetRow(word);
+                if (matrixRow != null)
                 {
-                    //totalEmotion.CopyMax(emotion);
-                    totalEmotion.Add(emotion);
-                    emotionCount++;
-                }
-                if (textEmotionDB.TryGetValue(word, out emotion))
-                {
-                    //totalEmotion.CopyMax(emotion);
-                    totalEmotion.Add(emotion);
-                    emotionCount++;
-                }
-                if (hedonometerDB.TryGetValue(word, out HedonometerEntry hEntry))
-                {
-                    totalHappiness.happiness += hEntry.happiness;
-                    hedonometerCount++;
-                }
-                if (militaryWordDB.TryGetValue(word, out float value))
-                {
-                    nukeyness += value;
+                    foreach (string header in matrixRow.GetColumnKeys())
+                    {
+                        float value = matrixRow[header];
+                        if (header.StartsWith("andbrain_"))
+                        {
+                            totalEmotion[header.Substring("andbrain_".Length)] += value;
+                            emotionCount++;
+                        }
+                        else if (header == "hedonometer_Happiness Score")
+                        {
+                            totalHappiness.happiness += value;
+                            hedonometerCount++;
+                        }
+                        else if (header == "military")
+                        {
+                            nukeyness += value;
+                        }
+                    }
                 }
             }
             (string maxEmotion, float maxEmotionValue) = totalEmotion.Max();
@@ -1256,6 +1225,7 @@ namespace Luna
             {
                 Console.WriteLine(result.ToString());
                 Console.WriteLine($"total: {emotionCount}, {hedonometerCount}");
+                Console.WriteLine($"prediction: {emotionClassifier.Predict(BasicTokenizer.Tokenize(sentence), 2)}");
             }
             return result;
         }

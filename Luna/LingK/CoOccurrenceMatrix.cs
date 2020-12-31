@@ -10,103 +10,118 @@ using Newtonsoft.Json;
 
 namespace LingK
 {
-    public interface ICoOccurrenceRow<TRowKey, TColumnKey>
+    public interface ICoOccurrenceRow<TRowKey, TColumnKey, TValue>
     {
         TRowKey RowKey { get; }
         bool ContainsKey(TColumnKey columnKey);
-        int GetValue(TColumnKey columnKey, int defaultValue);
-        bool TryGetValue(TColumnKey columnKey, out int value);
-        void SetValue(TColumnKey columnKey, int value);
-        int this[TColumnKey rowKey] { get; set; }
+        TValue GetValue(TColumnKey columnKey, TValue defaultValue);
+        bool TryGetValue(TColumnKey columnKey, out TValue value);
+        void SetValue(TColumnKey columnKey, TValue value);
+        TValue this[TColumnKey columnKey] { get; set; }
         IEnumerable<TColumnKey> GetColumnKeys();
     }
 
-    public interface ICoOccurrenceColumn<TRowKey, TColumnKey> : IEnumerable<KeyValuePair<TRowKey, int>>
+    public interface ICoOccurrenceColumn<TRowKey, TColumnKey, TValue> : IEnumerable<KeyValuePair<TRowKey, TValue>>
     {
         TColumnKey ColumnKey { get; }
         bool ContainsKey(TRowKey columnKey);
-        int GetValue(TRowKey rowKey, int defaultValue);
-        bool TryGetValue(TRowKey rowKey, out int value);
-        void SetValue(TRowKey rowKey, int value);
-        int Sum();
-        int SumIf(Predicate<(TRowKey rowKey, int value)> predicate);
+        TValue GetValue(TRowKey rowKey, TValue defaultValue);
+        bool TryGetValue(TRowKey rowKey, out TValue value);
+        void SetValue(TRowKey rowKey, TValue value);
+        TValue Sum();
+        TValue SumIf(Predicate<(TRowKey rowKey, TValue value)> predicate);
         int Count { get; }
-        int this[TRowKey rowKey] { get; set; }
+        TValue this[TRowKey rowKey] { get; set; }
         IEnumerable<TRowKey> GetRowKeys();
     }
 
-    public interface ICoOccurrenceMatrix<TRowKey, TColumnKey>
+    public interface ICoOccurrenceMatrix<TRowKey, TColumnKey, TValue>
     {
-        ICoOccurrenceColumn<TRowKey, TColumnKey> GetColumn(TColumnKey columnKey);
-        ICoOccurrenceRow<TRowKey, TColumnKey> GetRow(TRowKey rowKey);
-        int GetValue(TRowKey rowKey, TColumnKey columnKey, int defaultValue);
-        bool TryGetValue(TRowKey rowKey, TColumnKey columnKey, out int value);
-        void SetValue(TRowKey rowKey, TColumnKey columnKey, int value);
+        ICoOccurrenceColumn<TRowKey, TColumnKey, TValue> GetColumn(TColumnKey columnKey);
+        ICoOccurrenceRow<TRowKey, TColumnKey, TValue> GetRow(TRowKey rowKey);
+        TValue GetValue(TRowKey rowKey, TColumnKey columnKey, TValue defaultValue);
+        bool TryGetValue(TRowKey rowKey, TColumnKey columnKey, out TValue value);
+        void SetValue(TRowKey rowKey, TColumnKey columnKey, TValue value);
 
-        IEnumerable<ICoOccurrenceColumn<TRowKey, TColumnKey>> GetColumns();
-        IEnumerable<ICoOccurrenceRow<TRowKey, TColumnKey>> GetRows();
+        IEnumerable<ICoOccurrenceColumn<TRowKey, TColumnKey, TValue>> GetColumns();
+        IEnumerable<ICoOccurrenceRow<TRowKey, TColumnKey, TValue>> GetRows();
 
         IEnumerable<TColumnKey> GetColumnKeys();
         IEnumerable<TRowKey> GetRowKeys();
 
-        int this[TRowKey rowKey, TColumnKey columnKey] { get; set; }
+        TValue this[TRowKey rowKey, TColumnKey columnKey] { get; set; }
     }
 
-    public class CoOccurrenceDict<TRowKey> : ICoOccurrenceColumn<TRowKey, string>
+    public class CoOccurrenceDict<TRowKey, TValue> : ICoOccurrenceColumn<TRowKey, string, TValue>
     {
-        Dictionary<TRowKey, int> dict = new Dictionary<TRowKey, int>();
+        Dictionary<TRowKey, TValue> dict = new Dictionary<TRowKey, TValue>();
+        INumericPolicy<TValue> policy = (INumericPolicy<TValue>)NumericPolicies.Instance;
 
         public string ColumnKey => "";
         public bool ContainsKey(TRowKey rowKey) => dict.ContainsKey(rowKey);
-        public int GetValue(TRowKey rowKey, int defaultValue) => dict.TryGetValue(rowKey, out int value) ? value : defaultValue;
-        public bool TryGetValue(TRowKey rowKey, out int value) => dict.TryGetValue(rowKey, out value);
-        public void SetValue(TRowKey rowKey, int value) => dict[rowKey] = value;
-        public int Sum()
+        public TValue GetValue(TRowKey rowKey, TValue defaultValue) => dict.TryGetValue(rowKey, out TValue value) ? value : defaultValue;
+        public bool TryGetValue(TRowKey rowKey, out TValue value) => dict.TryGetValue(rowKey, out value);
+        public void SetValue(TRowKey rowKey, TValue value) => dict[rowKey] = value;
+        public TValue Sum()
         {
-            int sum = 0;
+            TValue sum = policy.Zero();
             foreach (var kvp in dict)
             {
-                sum += kvp.Value;
+                policy.Increment(ref sum, kvp.Value);
             }
             return sum;
         }
 
-        public int SumIf(Predicate<(TRowKey rowKey, int value)> predicate)
+        public TValue SumIf(Predicate<(TRowKey rowKey, TValue value)> predicate)
         {
-            int sum = 0;
+            TValue sum = policy.Zero();
             foreach (var kvp in dict)
             {
                 if (predicate((kvp.Key, kvp.Value)))
                 {
-                    sum += kvp.Value;
+                    policy.Increment(ref sum, kvp.Value);
                 }
             }
             return sum;
         }
 
-        public IEnumerator<KeyValuePair<TRowKey, int>> GetEnumerator() => dict.GetEnumerator();
+        public IEnumerator<KeyValuePair<TRowKey, TValue>> GetEnumerator() => dict.GetEnumerator();
         IEnumerator IEnumerable.GetEnumerator() => dict.GetEnumerator();
 
         public IEnumerable<string> GetColumnKeys() => ColumnKey.Yield();
         public IEnumerable<TRowKey> GetRowKeys() => dict.Keys;
 
         public int Count { get => dict.Count; }
-        public int this[TRowKey rowKey] { get => dict[rowKey]; set => dict[rowKey] = value; }
+        public TValue this[TRowKey rowKey] { get => dict[rowKey]; set => dict[rowKey] = value; }
     }
 
-    //TODO: load/save as .csv because it's smaller than json
-    public class CoOccurrenceMatrix<TRowKey, TColumnKey> : ICoOccurrenceMatrix<TRowKey, TColumnKey>
+    public class UnigramMatrix<TValue> : CoOccurrenceMatrix<string, string, TValue> where TValue : struct
     {
-        private class Column : ICoOccurrenceColumn<TRowKey, TColumnKey>
+        public UnigramMatrix(SerializeRow serializeRow = null, DeSerializeRow deserializeRow = null, SerializeColumn serializeColumn = null, DeSerializeColumn deserializeColumn = null) : base(serializeRow, deserializeRow, serializeColumn, deserializeColumn) {}
+    }
+    public class BigramMatrix<TValue> : CoOccurrenceMatrix<(string, string), string, TValue> where TValue : struct
+    {
+        public BigramMatrix(SerializeRow serializeRow = null, DeSerializeRow deserializeRow = null, SerializeColumn serializeColumn = null, DeSerializeColumn deserializeColumn = null) : base(serializeRow, deserializeRow, serializeColumn, deserializeColumn) { }
+    }
+    public class TrigramMatrix<TValue> : CoOccurrenceMatrix<(string, string, string), string, TValue> where TValue : struct
+    {
+        public TrigramMatrix(SerializeRow serializeRow = null, DeSerializeRow deserializeRow = null, SerializeColumn serializeColumn = null, DeSerializeColumn deserializeColumn = null) : base(serializeRow, deserializeRow, serializeColumn, deserializeColumn) { }
+    }
+
+    public class CoOccurrenceMatrix<TRowKey, TColumnKey, TValue> : ICoOccurrenceMatrix<TRowKey, TColumnKey, TValue> where TValue : struct
+    {
+        static INumericPolicy<TValue> policy = (INumericPolicy<TValue>)NumericPolicies.Instance;
+
+        private class Column : ICoOccurrenceColumn<TRowKey, TColumnKey, TValue>
         {
-            private readonly CoOccurrenceMatrix<TRowKey, TColumnKey> myTable;
+            private readonly CoOccurrenceMatrix<TRowKey, TColumnKey, TValue> myTable;
             private readonly TColumnKey thisKey;
 
             private bool isDirty;
 
             public TColumnKey ColumnKey => thisKey;
 
-            public Column(CoOccurrenceMatrix<TRowKey, TColumnKey> owningTable, TColumnKey thisKey)
+            public Column(CoOccurrenceMatrix<TRowKey, TColumnKey, TValue> owningTable, TColumnKey thisKey)
             {
                 myTable = owningTable;
                 this.thisKey = thisKey;
@@ -123,31 +138,31 @@ namespace LingK
                 return row.ContainsKey(thisKey);
             }
 
-            public int GetValue(TRowKey rowKey, int defaultValue = default)
+            public TValue GetValue(TRowKey rowKey, TValue defaultValue = default)
             {
                 var row = myTable.GetRow(rowKey);
                 if (row == null) return defaultValue;
 
                 return row.GetValue(thisKey, defaultValue);
             }
-            public bool TryGetValue(TRowKey rowKey, out int value)
+            public bool TryGetValue(TRowKey rowKey, out TValue value)
             {
-                value = 0;
+                value = policy.Zero();
                 var row = myTable.GetRow(rowKey);
                 if (row == null) return false;
 
                 return row.TryGetValue(thisKey, out value);
             }
 
-            public void SetValue(TRowKey rowKey, int value) => myTable.SetValue(rowKey, thisKey, value);
-            public int this[TRowKey rowKey]
+            public void SetValue(TRowKey rowKey, TValue value) => myTable.SetValue(rowKey, thisKey, value);
+            public TValue this[TRowKey rowKey]
             {
                 get => GetValue(rowKey);
                 set => SetValue(rowKey, value);
             }
 
-            private int _sum = 0;
-            public int Sum()
+            private TValue _sum = policy.Zero();
+            public TValue Sum()
             {
                 CheckDirty();
                 return _sum;
@@ -167,39 +182,39 @@ namespace LingK
             {
                 if (!isDirty) return;
 
-                _sum = 0;
+                _sum = policy.Zero();
                 _rowCount = 0;
                 foreach (var kvp in myTable.rowDict)
                 {
-                    if (kvp.Value.TryGetValue(thisKey, out int value))
+                    if (kvp.Value.TryGetValue(thisKey, out TValue value))
                     {
                         _rowCount++;
-                        _sum += value;
+                        policy.Increment(ref _sum, value);
                     }
                 }
                 isDirty = false;
             }
 
-            public int SumIf(Predicate<(TRowKey rowKey, int value)> predicate)
+            public TValue SumIf(Predicate<(TRowKey rowKey, TValue value)> predicate)
             {
-                int sum = 0;
+                TValue sum = policy.Zero();
                 foreach (var kvp in myTable.rowDict)
                 {
-                    if (kvp.Value.TryGetValue(thisKey, out int value) && predicate((kvp.Key, value)))
+                    if (kvp.Value.TryGetValue(thisKey, out TValue value) && predicate((kvp.Key, value)))
                     {
-                        sum += value;
+                        policy.Increment(ref _sum, value);
                     }
                 }
                 return sum;
             }
 
-            public IEnumerator<KeyValuePair<TRowKey, int>> GetEnumerator()
+            public IEnumerator<KeyValuePair<TRowKey, TValue>> GetEnumerator()
             {
                 foreach (TRowKey rowKey in myTable.rowDict.Keys)
                 {
-                    if (TryGetValue(rowKey, out int value))
+                    if (TryGetValue(rowKey, out TValue value))
                     {
-                        yield return new KeyValuePair<TRowKey, int>(rowKey, value);
+                        yield return new KeyValuePair<TRowKey, TValue>(rowKey, value);
                     }
                 }
             }
@@ -209,7 +224,7 @@ namespace LingK
             {
                 foreach (TRowKey rowKey in myTable.rowDict.Keys)
                 {
-                    if (TryGetValue(rowKey, out int value))
+                    if (TryGetValue(rowKey, out _))
                     {
                         yield return rowKey;
                     }
@@ -217,18 +232,18 @@ namespace LingK
             }
         }
 
-        private class Row : ICoOccurrenceRow<TRowKey, TColumnKey>
+        private class Row : ICoOccurrenceRow<TRowKey, TColumnKey, TValue>
         {
             [JsonIgnore]
-            private readonly CoOccurrenceMatrix<TRowKey, TColumnKey> myTable;
+            private readonly CoOccurrenceMatrix<TRowKey, TColumnKey, TValue> myTable;
             [JsonProperty("thisKey")]
             private readonly TRowKey thisKey;
             [JsonProperty("valuesDict")]
-            private readonly Dictionary<TColumnKey, int> valuesDict = new Dictionary<TColumnKey, int>();
+            private readonly Dictionary<TColumnKey, TValue> valuesDict = new Dictionary<TColumnKey, TValue>();
             [JsonIgnore]
             public TRowKey RowKey => thisKey;
 
-            public Row(CoOccurrenceMatrix<TRowKey, TColumnKey> owningTable, TRowKey thisKey)
+            public Row(CoOccurrenceMatrix<TRowKey, TColumnKey, TValue> owningTable, TRowKey thisKey)
             {
                 myTable = owningTable;
                 this.thisKey = thisKey;
@@ -236,15 +251,15 @@ namespace LingK
 
             public bool ContainsKey(TColumnKey columnKey) => valuesDict.ContainsKey(columnKey);
 
-            public int GetValue(TColumnKey columnKey, int defaultValue = default(int))
+            public TValue GetValue(TColumnKey columnKey, TValue defaultValue = default(TValue))
             {
-                if (valuesDict.TryGetValue(columnKey, out int value))
+                if (valuesDict.TryGetValue(columnKey, out TValue value))
                     return value;
                 return defaultValue;
             }
-            public bool TryGetValue(TColumnKey columnKey, out int value) => valuesDict.TryGetValue(columnKey, out value);
+            public bool TryGetValue(TColumnKey columnKey, out TValue value) => valuesDict.TryGetValue(columnKey, out value);
 
-            public void SetValue(TColumnKey columnKey, int value)
+            public void SetValue(TColumnKey columnKey, TValue value)
             {
                 myTable.columnKeys.Add(columnKey);
                 valuesDict[columnKey] = value;
@@ -253,7 +268,7 @@ namespace LingK
                     column.SetDirty();
                 }
             }
-            public int this[TColumnKey columnKey]
+            public TValue this[TColumnKey columnKey]
             {
                 get => GetValue(columnKey);
                 set => SetValue(columnKey, value);
@@ -300,7 +315,7 @@ namespace LingK
             columnCacheDict.Clear();
         }
 
-        public ICoOccurrenceColumn<TRowKey, TColumnKey> GetColumn(TColumnKey columnKey)
+        public ICoOccurrenceColumn<TRowKey, TColumnKey, TValue> GetColumn(TColumnKey columnKey)
         {
             if (!columnCacheDict.TryGetValue(columnKey, out var column))
             {
@@ -309,7 +324,7 @@ namespace LingK
             return column;
         }
 
-        public ICoOccurrenceRow<TRowKey, TColumnKey> GetRow(TRowKey rowKey)
+        public ICoOccurrenceRow<TRowKey, TColumnKey, TValue> GetRow(TRowKey rowKey)
         {
             if (rowDict.TryGetValue(rowKey, out Row value))
             {
@@ -318,7 +333,7 @@ namespace LingK
             return null;
         }
 
-        public void SetValue(TRowKey rowKey, TColumnKey columnKey, int value)
+        public void SetValue(TRowKey rowKey, TColumnKey columnKey, TValue value)
         {
             if (!rowDict.TryGetValue(rowKey, out Row row))
             {
@@ -327,8 +342,8 @@ namespace LingK
 
             row.SetValue(columnKey, value);
         }
-
-        public int GetValue(TRowKey rowKey, TColumnKey columnKey, int defaultValue = default)
+        
+        public TValue GetValue(TRowKey rowKey, TColumnKey columnKey, TValue defaultValue = default)
         {
             if (rowDict.TryGetValue(rowKey, out Row row))
             {
@@ -337,9 +352,9 @@ namespace LingK
 
             return defaultValue;
         }
-        public bool TryGetValue(TRowKey rowKey, TColumnKey columnKey, out int value)
+        public bool TryGetValue(TRowKey rowKey, TColumnKey columnKey, out TValue value)
         {
-            value = 0;
+            value = policy.Zero();
             if (rowDict.TryGetValue(rowKey, out Row row))
             {
                 return row.TryGetValue(columnKey, out value);
@@ -348,14 +363,24 @@ namespace LingK
             return false;
         }
 
-        public IEnumerable<ICoOccurrenceColumn<TRowKey, TColumnKey>> GetColumns()
+        public void IncrementValue(TRowKey rowKey, TColumnKey columnKey, TValue amount)
+        {
+            if (!rowDict.TryGetValue(rowKey, out Row row))
+            {
+                rowDict[rowKey] = row = new Row(this, rowKey);
+            }
+
+            row.SetValue(columnKey, policy.Add(row.GetValue(columnKey), amount));
+        }
+
+        public IEnumerable<ICoOccurrenceColumn<TRowKey, TColumnKey, TValue>> GetColumns()
         {
             foreach (TColumnKey columnKey in columnKeys)
             {
                 yield return GetColumn(columnKey);
             }
         }
-        public IEnumerable<ICoOccurrenceRow<TRowKey, TColumnKey>> GetRows()
+        public IEnumerable<ICoOccurrenceRow<TRowKey, TColumnKey, TValue>> GetRows()
         {
             return rowDict.Values;
         }
@@ -369,30 +394,70 @@ namespace LingK
             return rowDict.Keys;
         }
 
-        public int this[TRowKey rowKey, TColumnKey columnKey]
+        public TValue this[TRowKey rowKey, TColumnKey columnKey]
         {
             get => GetValue(rowKey, columnKey);
             set => SetValue(rowKey, columnKey, value);
         }
 
-        public void Load(string file)
+        public void Load(string file, char delimeter = '\t', bool increment = false, List<TColumnKey> overrideHeader = null, Func<TColumnKey, TColumnKey> modifyHeader = null, TColumnKey rowKeyColumn = default, TValue? defaultValue = null)
         {
+            if (modifyHeader == null)
+            {
+                modifyHeader = (x) => x;
+            }
             using (StreamReader reader = new StreamReader(file))
             {
-                CSVReader csvReader = new CSVReader(reader, '\t');
+                CSVReader csvReader = new CSVReader(reader, delimeter);
 
-                List<TColumnKey> header = new List<TColumnKey>();
-                csvReader.ReadRow().ForEach(x => header.Add(deserializeColumn(x)));
+                List<TColumnKey> header;
+                if (overrideHeader != null)
+                {
+                    header = overrideHeader;
+                }
+                else
+                {
+                    header = new List<TColumnKey>();
+                    csvReader.ReadRow().ForEach(x => header.Add(modifyHeader(deserializeColumn(x))));
+                }
+
+                int rowKeyColumnIndex = header.IndexOf(rowKeyColumn);
+                if (rowKeyColumnIndex == -1 || rowKeyColumn.Equals(default(TColumnKey)))
+                    rowKeyColumnIndex = 0;
 
                 List<string> row;
                 while ((row = csvReader.ReadRow()).Count > 0)
                 {
-                    TRowKey rowKey = deserializeRow(row[0]);
-                    for (int i = 1; i < header.Count && i < row.Count; i++)
+                    TRowKey rowKey = deserializeRow(row[rowKeyColumnIndex]);
+                    for (int i = 0; i < header.Count; i++)
                     {
-                        if (!string.IsNullOrEmpty(row[i]) && int.TryParse(row[i], out int value))
+                        if (i != rowKeyColumnIndex)
                         {
-                            SetValue(rowKey, header[i], value);
+                            if (i < row.Count)
+                            {
+                                if (!string.IsNullOrEmpty(row[i]) && policy.TryParse(row[i], out TValue value))
+                                {
+                                    if (increment)
+                                    {
+                                        IncrementValue(rowKey, header[i], value);
+                                    }
+                                    else
+                                    {
+                                        SetValue(rowKey, header[i], value);
+                                    }
+                                }
+                            }
+                            else if (defaultValue.HasValue)
+                            {
+                                if (increment)
+                                {
+                                    IncrementValue(rowKey, header[i], defaultValue.Value);
+                                }
+                                else
+                                {
+                                    SetValue(rowKey, header[i], defaultValue.Value);
+                                }
+                            }
                         }
                     }
                 }

@@ -38,6 +38,13 @@ namespace Luna
             }
         }
 
+        [Command("color")]
+        public async Task RandomColor()
+        {
+            string[] items = "red green blue orange white yellow".Split(' ');
+            await ReplyAsync(items[r.Next(items.Length)]);
+        }
+
         [Command("lookup")]
         public async Task Lookup([Remainder]string lookup)
         {
