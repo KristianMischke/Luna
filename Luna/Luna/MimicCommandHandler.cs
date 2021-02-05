@@ -23,6 +23,7 @@ using LingK;
 using WikiClientLibrary.Client;
 using WikiClientLibrary.Sites;
 using Microsoft.Extensions.Logging;
+using MathNet.Numerics.LinearAlgebra.Single;
 
 namespace Luna
 {
@@ -45,6 +46,13 @@ namespace Luna
         public NaiveBayesClassifier emotionClassifier = new NaiveBayesClassifier(); //TODO: backoff classifier?
         public MoodProfile moodProfile = new MoodProfile();
         public bool markMood = false;
+
+        public Dictionary<string, DenseVector> gloveEmbeddings = new Dictionary<string, DenseVector>();
+        public const int GLOVE_DIMS = 200;
+
+        public Dictionary<string, ulong> nicknameMap = new Dictionary<string, ulong>();
+        public List<List<string>> nicknameMathLHS = new List<List<string>>();
+        public List<List<string>> nicknameMathRHS = new List<List<string>>();
 
         public Dictionary<string, List<(string status, ActivityType activity)>> statusByMood = new Dictionary<string, List<(string status, ActivityType activity)>>();
         public Dictionary<string, List<IEmote>> moodEmoji = new Dictionary<string, List<IEmote>>();
@@ -88,6 +96,21 @@ namespace Luna
         public string UsersDirectory => MimicDirectory + "/users";
 
         SymSpell _symSpell;
+
+        public void CacheUsername(ulong id, string name = null)
+        {
+            SocketUser discordUser = _client.GetUser(id);
+            if (discordUser != null)
+            {
+                name = discordUser.Username;
+            }
+
+            if (name != null && AllUserData.TryGetValue(id, out var customUserData))
+            {
+                usernameCache[id] = name;
+                customUserData.discordUsername = name;
+            }
+        }
 
         public MimicCommandHandler(DiscordSocketClient client)
         {
@@ -193,7 +216,7 @@ namespace Luna
                                     {
                                         string mimicString = fullMessageContent;
 
-                                        usernameCache[authorId] = authorName;
+                                        CacheUsername(authorId, authorName);
 
                                         Regex uidRegex = new Regex(@"<@&71(?<uid>\d+)>");
                                         foreach (Match match in uidRegex.Matches(fullMessageContent))
@@ -203,13 +226,9 @@ namespace Luna
                                                 try
                                                 {
                                                     ulong uid = ulong.Parse(match.Groups["uid"].Value);
-                                                    SocketUser u = context.Guild.GetUser(uid);
-                                                    if (u != null)
-                                                    {
-                                                        usernameCache[uid] = u.Username;
-                                                    }
+                                                    CacheUsername(uid);
 
-                                                    Regex userIDRegex = new Regex($"<@(|!|&){u?.Id ?? uid}>");
+                                                    Regex userIDRegex = new Regex($"<@(|!|&){uid}>");
                                                     mimicString = userIDRegex.Replace(mimicString, MarkovChain.USER_GRAM);
                                                 }
                                                 catch (Exception e)
@@ -302,13 +321,13 @@ namespace Luna
                             {
                                 string mimicString = message.Content;
 
-                                usernameCache[message.Author.Id] = message.Author.Username;
+                                CacheUsername(message.Author.Id, message.Author.Username);
                                 foreach (ulong uid in message.MentionedUserIds)
                                 {
                                     SocketUser u = context.Guild.GetUser(uid);
                                     if (u != null)
                                     {
-                                        usernameCache[u.Id] = u.Username;
+                                        CacheUsername(u.Id, u.Username);
                                         if (!u.IsBot)
                                         {
                                             //Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
@@ -373,9 +392,14 @@ namespace Luna
                         playerData = AllUserData[id] = new CustomUserData(id);
                     }
 
-                    try { await playerData.LoadDataAsync(file); }
+                    try
+                    {
+                        await playerData.LoadDataAsync(file);
+                    }
                     catch (FileNotFoundException) { }
                     catch (Exception e) { Console.WriteLine($"Path: {file}\nException: {e.Message}\nStack: {e.StackTrace}"); }
+
+                    CacheUsername(id);
                 }
             }
 
@@ -408,6 +432,85 @@ namespace Luna
                     {
                         line = await sr.ReadLineAsync();
                         errorMessages.Add(line);
+                    } while (line != null);
+                }
+            }
+
+            { // load GloVe embeddings
+                using (StreamReader sr = new StreamReader(MimicDirectory + $"/glove.6B/glove.6B.{GLOVE_DIMS}d.txt"))
+                {
+                    string line;
+                    do
+                    {
+                        line = sr.ReadLine();//await sr.ReadLineAsync();
+                        if (!string.IsNullOrEmpty(line))
+                        {
+                            string[] entry = line.Split(' ');
+
+                            if (entry.Length == GLOVE_DIMS + 1)
+                            {
+                                float[] values = new float[GLOVE_DIMS];
+                                for (int i = 0; i < GLOVE_DIMS; i++)
+                                {
+                                    values[i] = float.Parse(entry[i + 1]);
+                                }
+
+                                DenseVector vector = new DenseVector(values);
+                                gloveEmbeddings.Add(entry[0], vector);
+                            }
+                        }
+                    } while (line != null);
+                }
+            }
+
+            { // load nickname math
+                nicknameMap.Add("luna", _client.CurrentUser.Id);
+                using (StreamReader sr = new StreamReader(MimicDirectory + "/foodMath.txt"))
+                {
+                    bool doneNicknames = false;
+                    string line;
+                    do
+                    {
+                        line = sr.ReadLine();//await sr.ReadLineAsync();
+
+                        if (!string.IsNullOrEmpty(line))
+                        {
+                            if (!doneNicknames)
+                            {
+                                string[] entry = line.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+                                ulong id = ulong.Parse(entry[0]);
+                                for (int i = 1; i < entry.Length; i++)
+                                {
+                                    nicknameMap.Add(entry[i].ToLowerInvariant(), id);
+                                }
+                            }
+                            else
+                            {
+                                string[] equation = line.Split("= ", StringSplitOptions.RemoveEmptyEntries);
+                                char[] splitChars = " \t".ToCharArray();
+
+                                List<string> lhs = new List<string>();
+                                foreach (string item in equation[0].Split(splitChars, StringSplitOptions.RemoveEmptyEntries)) // lhs
+                                {
+                                    if (nicknameMap.TryGetValue(item.ToLowerInvariant(), out var id))
+                                    {
+                                        lhs.Add(id.ToString());
+                                    }
+                                    else
+                                    {
+                                        lhs.Add(item.ToLowerInvariant());
+                                    }
+                                }
+                                List<string> rhs = new List<string>(equation[1].Split(" || ", StringSplitOptions.RemoveEmptyEntries));
+
+                                nicknameMathLHS.Add(lhs);
+                                nicknameMathRHS.Add(rhs);
+                            }
+                        }
+                        else
+                        {
+                            doneNicknames = true;
+                        }
                     } while (line != null);
                 }
             }
@@ -776,6 +879,7 @@ namespace Luna
 
             foreach (KeyValuePair<ulong, CustomUserData> kvp in AllUserData)
             {
+                CacheUsername(kvp.Key);
                 kvp.Value.SaveData(UsersDirectory + "/" + kvp.Key);
             }
             _markovSemaphore.Release();
@@ -987,7 +1091,7 @@ namespace Luna
                         } while (threshold < 0.10);
                     }
 
-                    usernameCache[message.Author.Id] = message.Author.Username;
+                    CacheUsername(message.Author.Id, message.Author.Username);
                     if (!iAmMentioned || message.Content.Trim().Split(' ').Length > 1) // don't record in mimic data if text is only the bot's mention
                     {
                         string mimicString = PreProcessUserMessage(message.Content, message.MentionedUsers);
@@ -1075,7 +1179,7 @@ namespace Luna
                 {
                     if (u != null)
                     {
-                        usernameCache[u.Id] = u.Username;
+                        CacheUsername(u.Id, u.Username);
                         if (!u.IsBot)
                         {
                             Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
@@ -1162,7 +1266,7 @@ namespace Luna
                         }
                     }
 
-                    usernameCache[kvp.Key] = (await message.Channel.GetUserAsync(kvp.Key))?.Username ?? "";
+                    CacheUsername(kvp.Key);
                     string msgType = (didUseGIF ? "GIF" : (useLunasModel ? "luna" : "stupidBackoff"));
                     Console.WriteLine($"{(useLunasModel ? "" : kvp.Key.ToString() + $"[{usernameCache.GetValueOrDefault(kvp.Key, "")}]")} {msgType} | {newMessageText}");
                     Console.WriteLine();
@@ -1247,9 +1351,10 @@ namespace Luna
         {
             if (AllUserData.TryGetValue(message.Author.Id, out CustomUserData userData) && userData.TrackMe)
             {
-                messageEditQueue.Enqueue((message.Author.Id, message.Id, PreProcessUserMessage(message.Content, message.MentionedUsers), message.EditedTimestamp));
+                string processedMessage = PreProcessUserMessage(message.Content, message.MentionedUsers);
+                messageEditQueue.Enqueue((message.Author.Id, message.Id, processedMessage, message.EditedTimestamp));
                 usernameCache.TryGetValue(message.Author.Id, out string username);
-                Console.WriteLine($"{message.Author.Id}[{username ?? ""}] {message.Content} [EDITED]");
+                Console.WriteLine($"{message.Author.Id}[{username ?? ""}] {processedMessage} [EDITED]");
             }
         }
 
@@ -1393,6 +1498,212 @@ namespace Luna
             }
 
             return results;
+        }
+
+        public async Task<string> CalculateWordMath(SocketMessage message, string input)
+        {
+            string processedInput = input;
+
+            if (message.MentionedUsers != null)
+            {
+                foreach (IUser u in message.MentionedUsers)
+                {
+                    if (u != null)
+                    {
+                        CacheUsername(u.Id, u.Username);
+                        if (!u.IsBot)
+                        {
+                            Regex userIDRegex = new Regex($"<@(|!|&){u.Id}>");
+                            processedInput = userIDRegex.Replace(processedInput, u.Id.ToString());
+                        }
+                    }
+                }
+            }
+
+            processedInput = PreProcessUserMessage(input, null).ToLowerInvariant();
+
+            Regex splitRegex = new Regex(@"(\(|\))| ");
+            string[] tokens = splitRegex.Split(processedInput);//processedInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            Console.WriteLine(string.Join(" ", tokens));
+
+            // check for special math
+            {
+                int matchIndex = -1;
+                for (int i = 0; i < nicknameMathLHS.Count; i++)
+                {
+                    var lhs = nicknameMathLHS[i];
+
+                    bool matchForward = true;
+                    bool matchBackward = true;
+                    for (int j = 0; j < lhs.Count; j++)
+                    {
+                        if (tokens.Length != lhs.Count)
+                        {
+                            matchForward = false;
+                            matchBackward = false;
+                            break;
+                        }
+                        if (tokens[j] != lhs[j] && (!nicknameMap.TryGetValue(tokens[j], out ulong id) || id.ToString() != lhs[j]))
+                        {
+                            matchForward = false;
+                        }
+                        if (tokens[j] != lhs[lhs.Count-1-j] && (!nicknameMap.TryGetValue(tokens[j], out id) || id.ToString() != lhs[lhs.Count - 1 - j]))
+                        {
+                            matchBackward = false;
+                        }
+                    }
+
+                    if (matchForward || matchBackward)
+                    {
+                        matchIndex = i;
+                        break;
+                    }
+                }
+
+                if (matchIndex != -1)
+                {
+                    string randomResult = nicknameMathRHS[matchIndex][r.Next(nicknameMathRHS[matchIndex].Count)];
+                    if (!randomResult.Contains("::/") && r.NextDouble() < 0.08)
+                    {
+                        randomResult = await GetGIFLink(randomResult);
+                    }
+
+                    return randomResult;
+                }
+            }
+
+            Stack<string> operationStack = new Stack<string>();
+            Stack<(float, DenseVector)> valueStack = new Stack<(float, DenseVector)>();
+            int parensDepth = 0;
+
+            void DoTopOperation()
+            {
+                if (valueStack.Count == operationStack.Count + 1 && valueStack.Count > 1 + parensDepth)
+                {
+                    // use operation with this vector and the top of the stack
+                    var (topValue, topVector) = valueStack.Pop();
+                    var (secondValue, secondVector) = valueStack.Pop();
+                    string op = operationStack.Pop();
+
+                    if (op == "+" || op == "-")
+                    {
+                        if (op == "+")
+                        {
+                            if (secondVector != null && topVector != null)
+                            {
+                                secondVector += topVector;
+                            }
+                            else
+                            {
+                                secondVector = null;
+                            }
+                            secondValue += topValue;
+                        }
+                        else if (op == "-")
+                        {
+                            if (secondVector != null && topVector != null)
+                            {
+                                secondVector -= topVector;
+                            }
+                            else
+                            {
+                                secondVector = null;
+                            }
+                            secondValue -= topValue;
+                        }
+                    }
+                    else if (op == "*" || op == "/")
+                    {
+                        if (op == "*")
+                        {
+                            if (secondVector != null) secondVector *= topValue;
+                            secondValue *= topValue;
+                        }
+                        else if (op == "/")
+                        {
+                            if (secondVector != null) secondVector /= topValue;
+                            secondValue /= topValue;
+                        }
+                    }
+
+                    valueStack.Push((secondValue, secondVector));
+                }
+            }
+
+            foreach (string token in tokens)
+            {
+                if (token == "+" || token == "-" || token == "*" || token == "/")
+                {
+                    if (valueStack.Count <= operationStack.Count)
+                    {
+                        return $"invalid format, word-vector must appear before {token} operation";
+                    }
+                    else
+                    {
+                        operationStack.Push(token);
+                    }
+                }
+                else if (token == "(")
+                {
+                    parensDepth++;
+                }
+                else if (token == ")")
+                {
+                    if (parensDepth == 0)
+                    {
+                        return "too many closing parenthesis!!";
+                    }
+                    parensDepth--;
+                    DoTopOperation();
+                }
+                else if (float.TryParse(token, out float floatValue))
+                {
+                    // push scalar then try to do operation
+                    valueStack.Push((floatValue, null));
+                    DoTopOperation();
+                }
+                else if (gloveEmbeddings.TryGetValue(token, out var vector))
+                {
+                    // push vector then try to do operation
+                    valueStack.Push((float.NaN, DenseVector.OfVector(vector)));
+                    DoTopOperation();
+                }
+            }
+
+            if (parensDepth != 0 || valueStack.Count != 1)
+            {
+                return "too many opening parenthesis!";
+            }
+
+            var (resultValue, resultVector) = valueStack.Pop();
+
+            if (resultVector == null)
+            {
+                return resultValue.ToString();
+            }
+            else
+            {
+                string nearestGram = "";
+                DenseVector nearestVector = null;
+                float nearestDist = float.PositiveInfinity;
+                foreach (var (gram, vector) in gloveEmbeddings)
+                {
+                    if (!tokens.Contains(gram)) // avoid words in the original equation
+                    {
+                        float dist = MathNet.Numerics.Distance.SSD(resultVector.Values, vector.Values);
+                        if (dist < nearestDist)
+                        {
+                            nearestDist = dist;
+                            nearestGram = gram;
+                            nearestVector = vector;
+                        }
+                    }
+                }
+
+                Console.WriteLine($"{nearestGram} {nearestDist}\n{(nearestVector?.ToString() ?? "null")}");
+                return nearestGram;
+            }
         }
     }
 }

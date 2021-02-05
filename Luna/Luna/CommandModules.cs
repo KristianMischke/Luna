@@ -38,6 +38,12 @@ namespace Luna
             }
         }
 
+        [Command("math")]
+        public async Task WordMath([Remainder] string input)
+        {
+            await ReplyAsync(await MimicCommandHandler._instance.CalculateWordMath(Context.Message, input));
+        }
+
         [Command("color")]
         public async Task RandomColor()
         {

@@ -13,6 +13,7 @@
   <ItemGroup>
     <PackageReference Include="CXuesong.MW.WikiClientLibrary" Version="0.7.3" />
     <PackageReference Include="Discord.Net" Version="2.1.1" />
+    <PackageReference Include="MathNet.Numerics" Version="4.15.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="5.0.0" />
     <PackageReference Include="symspell" Version="6.5.0" />
   </ItemGroup>

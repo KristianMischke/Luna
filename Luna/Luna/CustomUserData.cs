@@ -29,6 +29,8 @@ namespace Luna
 
         public bool TrackMe { get { return (bool)(data["tracking"] ?? false); } set { data["tracking"] = value; } }
 
+        public string discordUsername { get { return (string)data["discordUsername"]; } set { data["discordUsername"] = value; } }
+
         public MoodProfile mood, lunasMoodWithUser;
 
         public JObject data;
