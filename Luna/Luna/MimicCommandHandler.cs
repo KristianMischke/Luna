@@ -87,7 +87,7 @@ namespace Luna
             get
             {
                 if (string.IsNullOrEmpty(_mimicDirectory))
-                    _mimicDirectory = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH", EnvironmentVariableTarget.User);
+                    _mimicDirectory = Environment.GetEnvironmentVariable("KBOT_MIMIC_DATA_PATH");
                 return _mimicDirectory;
             }
         }
@@ -271,8 +271,8 @@ namespace Luna
             {
                 await using (StreamWriter sr = new StreamWriter($"{BackupDirectory}/100k_{channel.Name}.txt"))
                 {
-                    var asyncEnumerator = channel.GetMessagesAsync(context.Message, Direction.Before, 100_000).GetEnumerator();
-                    while (await asyncEnumerator.MoveNext())
+                    var asyncEnumerator = channel.GetMessagesAsync(context.Message, Direction.Before, 100_000).GetAsyncEnumerator();
+                    while (await asyncEnumerator.MoveNextAsync())
                     {
                         foreach (IMessage message in asyncEnumerator.Current)
                         {
@@ -1388,8 +1388,8 @@ namespace Luna
                 if (oppositeEmoji != null)
                 {
                     var test = message.GetReactionUsersAsync(oppositeEmoji, 100);
-                    var enumerator = test.GetEnumerator();
-                    while (await enumerator.MoveNext())
+                    var enumerator = test.GetAsyncEnumerator();
+                    while (await enumerator.MoveNextAsync())
                     {
                         if (enumerator.Current.Select(x => x.Id).Contains(reaction.UserId))
                         {

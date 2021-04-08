@@ -125,8 +125,8 @@ namespace Luna
 
             List<(float, string, IMessage)> pmiMessages = new List<(float, string, IMessage)>();
 
-            var asyncEnumerator = Context.Channel.GetMessagesAsync(window).GetEnumerator();
-            while (await asyncEnumerator.MoveNext())
+            var asyncEnumerator = Context.Channel.GetMessagesAsync(window).GetAsyncEnumerator();
+            while (await asyncEnumerator.MoveNextAsync())
             {
                 foreach (IMessage message in asyncEnumerator.Current)
                 {

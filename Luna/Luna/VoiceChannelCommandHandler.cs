@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
-using System.Speech.Synthesis;
-using System.Speech.AudioFormat;
-using System.Speech.Recognition;
+// using System.Speech.Synthesis;
+// using System.Speech.AudioFormat;
+// using System.Speech.Recognition;
 using System.Threading.Tasks;
 using Discord;
 using Discord.Audio;
@@ -25,7 +25,7 @@ namespace Luna
         private IAudioChannel audioChannel;
         private AudioOutStream audioOut;
 
-        SpeechSynthesizer synth;
+        //SpeechSynthesizer synth;
 
         public VoiceChannelCommandHandler(DiscordSocketClient client)
         {
@@ -41,30 +41,30 @@ namespace Luna
 
             audioClient.StreamCreated += AudioClient_StreamCreated;
 
-            if (synth == null)
-            {
-                audioOut = audioClient.CreateDirectPCMStream(AudioApplication.Mixed);
-
-                synth = new SpeechSynthesizer();
-                synth.Volume = 100;
-                synth.Rate = 1;
-
-                foreach (var v in synth.GetInstalledVoices())
-                    Console.WriteLine(v.VoiceInfo.Name);
-
-                synth.SelectVoiceByHints(VoiceGender.Female, VoiceAge.Adult);
-                synth.SetOutputToAudioStream(audioOut, new SpeechAudioFormatInfo(1920, AudioBitsPerSample.Sixteen, AudioChannel.Stereo));
-                try
-                {
-                    Task<string> mimicMsgTask = MimicCommandHandler._instance.GetMimicMessage(null, false, true);
-                    mimicMsgTask.Wait();
-                    synth.SpeakAsync(mimicMsgTask.Result);
-                }
-                finally
-                {
-                    audioOut.FlushAsync();
-                }
-            }
+            // if (synth == null)
+            // {
+            //     audioOut = audioClient.CreateDirectPCMStream(AudioApplication.Mixed);
+            //
+            //     synth = new SpeechSynthesizer();
+            //     synth.Volume = 100;
+            //     synth.Rate = 1;
+            //
+            //     foreach (var v in synth.GetInstalledVoices())
+            //         Console.WriteLine(v.VoiceInfo.Name);
+            //
+            //     synth.SelectVoiceByHints(VoiceGender.Female, VoiceAge.Adult);
+            //     synth.SetOutputToAudioStream(audioOut, new SpeechAudioFormatInfo(1920, AudioBitsPerSample.Sixteen, AudioChannel.Stereo));
+            //     try
+            //     {
+            //         Task<string> mimicMsgTask = MimicCommandHandler._instance.GetMimicMessage(null, false, true);
+            //         mimicMsgTask.Wait();
+            //         synth.SpeakAsync(mimicMsgTask.Result);
+            //     }
+            //     finally
+            //     {
+            //         audioOut.FlushAsync();
+            //     }
+            // }
 
 
             Thread.Sleep(5000);
@@ -74,30 +74,30 @@ namespace Luna
         {
             Console.WriteLine(arg1);
 
-            using (SpeechRecognitionEngine recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US")))
-            {
-                // Create and load a dictation grammar.  
-                recognizer.LoadGrammar(new DictationGrammar());
-
-                // Add a handler for the speech recognized event.  
-                recognizer.SpeechRecognized += new EventHandler<SpeechRecognizedEventArgs>(recognizer_SpeechRecognized);
-
-                // Configure input to the speech recognizer.  
-                recognizer.SetInputToAudioStream(arg2, new SpeechAudioFormatInfo(1920, AudioBitsPerSample.Sixteen, AudioChannel.Stereo));
-
-                // Start asynchronous, continuous speech recognition.  
-                recognizer.RecognizeAsync(RecognizeMode.Multiple);
-
-                Thread.Sleep(5000);
-                recognizer.RecognizeAsyncCancel();
-            }
+            // using (SpeechRecognitionEngine recognizer = new SpeechRecognitionEngine(new CultureInfo("en-US")))
+            // {
+            //     // Create and load a dictation grammar.  
+            //     recognizer.LoadGrammar(new DictationGrammar());
+            //
+            //     // Add a handler for the speech recognized event.  
+            //     recognizer.SpeechRecognized += new EventHandler<SpeechRecognizedEventArgs>(recognizer_SpeechRecognized);
+            //
+            //     // Configure input to the speech recognizer.  
+            //     recognizer.SetInputToAudioStream(arg2, new SpeechAudioFormatInfo(1920, AudioBitsPerSample.Sixteen, AudioChannel.Stereo));
+            //
+            //     // Start asynchronous, continuous speech recognition.  
+            //     recognizer.RecognizeAsync(RecognizeMode.Multiple);
+            //
+            //     Thread.Sleep(5000);
+            //     recognizer.RecognizeAsyncCancel();
+            // }
         }
 
         // Handle the SpeechRecognized event.  
-        static void recognizer_SpeechRecognized(object sender, SpeechRecognizedEventArgs e)
-        {
-            Console.WriteLine("Recognized text: " + e.Result.Text);
-        }
+        // static void recognizer_SpeechRecognized(object sender, SpeechRecognizedEventArgs e)
+        // {
+        //     Console.WriteLine("Recognized text: " + e.Result.Text);
+        // }
 
         public void Cleanup()
         {

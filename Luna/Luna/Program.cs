@@ -11,20 +11,20 @@ namespace Luna
     class Program
     {
 
-        [DllImport("Kernel32")]
-        private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
+        // [DllImport("Kernel32")]
+        // private static extern bool SetConsoleCtrlHandler(EventHandler handler, bool add);
 
-        private delegate bool EventHandler(CtrlType sig);
-        static EventHandler _onExitHandler;
-
-        enum CtrlType
-        {
-            CTRL_C_EVENT = 0,
-            CTRL_BREAK_EVENT = 1,
-            CTRL_CLOSE_EVENT = 2,
-            CTRL_LOGOFF_EVENT = 5,
-            CTRL_SHUTDOWN_EVENT = 6
-        }
+        // private delegate bool EventHandler(CtrlType sig);
+        // static EventHandler _onExitHandler;
+        //
+        // enum CtrlType
+        // {
+        //     CTRL_C_EVENT = 0,
+        //     CTRL_BREAK_EVENT = 1,
+        //     CTRL_CLOSE_EVENT = 2,
+        //     CTRL_LOGOFF_EVENT = 5,
+        //     CTRL_SHUTDOWN_EVENT = 6
+        // }
 
         private DiscordSocketClient _client;
         private CommandService _commandService;
@@ -41,7 +41,7 @@ namespace Luna
             _client.Log += Log;
 
             // Some alternative options would be to keep your token in an Environment Variable or a standalone file.
-            string token = Environment.GetEnvironmentVariable("DISCORD_KBOT_TOKEN", EnvironmentVariableTarget.User);
+            string token = Environment.GetEnvironmentVariable("DISCORD_KBOT_TOKEN");
 
             await _client.LoginAsync(TokenType.Bot, token);
             await _client.StartAsync();
@@ -53,8 +53,8 @@ namespace Luna
             await _commandHandler.SetupAsync();
 
             // Some biolerplate to react to close window event
-            _onExitHandler += new EventHandler(ExitHandler);
-            SetConsoleCtrlHandler(_onExitHandler, true);
+            // _onExitHandler += new EventHandler(ExitHandler);
+            // SetConsoleCtrlHandler(_onExitHandler, true);
 
             // Block this task until the program is closed.
             await Task.Delay(-1);
@@ -66,10 +66,10 @@ namespace Luna
             return Task.CompletedTask;
         }
 
-        private static bool ExitHandler(CtrlType sig)
-        {
-            CommandManager._instance.Cleanup();
-            return false;
-        }
+        // private static bool ExitHandler(CtrlType sig)
+        // {
+        //     CommandManager._instance.Cleanup();
+        //     return false;
+        // }
     }
 }
