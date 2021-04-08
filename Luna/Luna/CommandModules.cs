@@ -189,6 +189,41 @@ namespace Luna
             await ReplyAsync(embed: embedBuilder.Build());
         }
 
+        [Command("count")]
+        public async Task CountGrams(SocketUser user, [Remainder] string input)
+        {
+            StringBuilder responseBuilder = new StringBuilder();
+
+            CustomUserData userData = MimicCommandHandler._instance.LunasUser;
+            if (user != null && user.Id != Context.Client.CurrentUser.Id && !MimicCommandHandler._instance.GetConsentualUser(user.Id, out userData))
+            {
+                responseBuilder.Append($"Oh no, I count not find {user?.Username + "'s" ?? "their"} stats");
+            }
+            else
+            {
+                string[] split = input.Split(' ');
+
+                if (split.Length == 3)
+                {
+                    responseBuilder.Append(userData.trigramMatrix[(split[0], split[1], split[2]), "all"]);
+                }
+                else if (split.Length == 2)
+                {
+                    responseBuilder.Append(userData.bigramMatrix[(split[0], split[1]), "all"]);
+                }
+                else if (split.Length == 1)
+                {
+                    responseBuilder.Append(userData.unigramMatrix[split[0], "all"]);
+                }
+                else
+                {
+                    responseBuilder.Append($"Unable to find data for {input}");
+                }
+            }
+
+            await ReplyAsync(responseBuilder.ToString());
+        }
+        
 
         [Command("stats")]
         public async Task UserStats(SocketUser user = null, string type = null, int num = 5, float lambda = 0f, float max = float.PositiveInfinity)
