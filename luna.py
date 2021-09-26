@@ -222,17 +222,6 @@ def prepare_context_for_gpt3(message_context: list[discord.Message], users) -> s
     return result
 
 
-def prepare_context_for_blenderbot(message_context: list[discord.Message], users) -> str:
-    result = ""
-
-    for m in message_context:
-        # TODO: custom cleaning for @ mentions and emoji
-
-        result += f"{m.clean_content}</s> <s>"
-
-    return result
-
-
 # def replace_user_mentions_for_gpt3(message: discord.Message) -> str:
 #     result = message.content
 #     for user in message.mentions:
