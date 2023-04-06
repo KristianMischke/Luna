@@ -133,3 +133,4 @@ $RECYCLE.BIN/
 .DS_Store
 
 _NCrunch*
+/LunaPhase3/src/.env
