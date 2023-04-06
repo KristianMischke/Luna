@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from dotenv import load_dotenv
@@ -17,15 +18,27 @@ open_ai_chat_gpt = OpenAiChatGPT("gpt-3.5-turbo", open_ai_api_key, usage_tracker
 chat_context = []
 
 
-def receive_message(message: str):
+async def luna_response(message: str):
     print(message)
     chat_context.append(ChatMessage(role="assistant", content=message))
 
 
-while True:
-    print("")
-    user_input = input()
-    chat_context.append(ChatMessage(role="user", content=user_input))
+async def main():
+    while True:
+        print("")
 
-    luna = Luna(chat_context, receive_message, open_ai_chat_gpt)
-    luna.respond()
+        user_prompt = ""
+
+        user_line = input()
+        while user_line.strip() != "":
+            user_prompt += user_line
+            user_line = input()
+
+        chat_context.append(ChatMessage(role="user", content=user_prompt))
+
+        luna = Luna(chat_context, luna_response, open_ai_chat_gpt)
+        await luna.respond()
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
