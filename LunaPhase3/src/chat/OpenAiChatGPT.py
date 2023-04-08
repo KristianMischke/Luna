@@ -19,5 +19,5 @@ class OpenAiChatGPT(ChatResponseGenerator):
     def generate_chat_response(self, chat_messages: list[ChatMessage]) -> str:
         messages = OpenAiChatGPT.__convert_chat_messages_to_dicts(chat_messages)
         completion = openai.ChatCompletion.create(model=self.model, messages=messages)
-        self.usage_tracker.track_usage(**completion.usage)
+        self.usage_tracker.track_usage(self.model, **completion.usage)
         return completion.choices[0].message.content

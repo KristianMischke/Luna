@@ -1,7 +1,7 @@
 from typing import Callable, Awaitable
 
-from chat.ChatResponseGenerator import ChatResponseGenerator
 from chat.ChatMessage import ChatMessage
+from src.LunaBrain import LunaBrain
 
 
 class Luna:
@@ -9,12 +9,13 @@ class Luna:
     def __init__(self,
                  chat_context: list[ChatMessage],
                  respond_callback: Callable[[str], Awaitable[None]],
-                 response_generator: ChatResponseGenerator
+                 luna_brain: LunaBrain
                  ):
         self._chat_context = chat_context
         self._respond = respond_callback
-        self._response_generator = response_generator
+        self._brain = luna_brain
 
     async def respond(self):
-        response = self._response_generator.generate_chat_response(self._chat_context)
+        response = self._brain.generate_chat_response(self._chat_context)
+        print("Luna: " + response)
         await self._respond(response)
