@@ -7,8 +7,8 @@ from discord import Intents
 from Luna import Luna
 from chat.ChatResponseGenerator import ChatResponseGenerator
 from chat.ChatMessage import ChatMessage
-from src.LunaBrain import LunaBrain
-from src.LunaBrainState import Intelligence
+from LunaBrain import LunaBrain
+from LunaBrainState import Intelligence
 
 
 async def get_context_messages(message: discord.Message, max_context: int) -> list[discord.Message]:

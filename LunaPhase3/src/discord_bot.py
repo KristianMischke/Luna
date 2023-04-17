@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 
 from LunaBot import LunaDiscordBot
 from UsageTrackerDict import UsageTrackerDict
-from src.LunaBrain import LunaBrain
-from src.LunaBrainState import LunaBrainState
+from LunaBrain import LunaBrain
+from LunaBrainState import LunaBrainState
 
 load_dotenv()
 

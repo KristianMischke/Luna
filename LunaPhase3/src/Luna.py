@@ -2,7 +2,7 @@ import re
 from typing import Callable, Awaitable
 
 from chat.ChatMessage import ChatMessage
-from src.LunaBrain import LunaBrain
+from LunaBrain import LunaBrain
 
 
 class Luna:

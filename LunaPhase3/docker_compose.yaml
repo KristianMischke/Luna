@@ -1,0 +1,10 @@
+version: '3.9'
+
+services:
+  luna:
+    container_name: luna
+    build:
+      dockerfile: Dockerfile
+      context: .
+    env_file:
+      - src/.env
