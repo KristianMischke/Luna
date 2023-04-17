@@ -42,7 +42,7 @@ class LunaDiscordBot(discord.Client):
         for message in messages:
             is_me = message.author == self.user
             role = "assistant" if is_me else "user"
-            content = message.content if is_me else self._add_username_to_message(message)
+            content = "/respond " + message.content if is_me else self._add_username_to_message(message)
             chat_messages.append(ChatMessage(role=role, content=content))
         return chat_messages
 
@@ -61,7 +61,7 @@ class LunaDiscordBot(discord.Client):
                 self.luna_brain.brain_state.intelligence = Intelligence.ChatGPT
             print(f"set intelligence: {self.luna_brain.brain_state.intelligence}")
 
-        if not contains_luna and random.random() > 0.5:
+        if not contains_luna and random.random() < 0.97:
             print("..skipping")
             return
 
@@ -76,4 +76,4 @@ class LunaDiscordBot(discord.Client):
         luna = Luna(chat_context, luna_response, self.luna_brain)
 
         async with channel.typing():
-            await luna.respond()
+            await luna.generate_and_execute_response_commands()

@@ -1,3 +1,4 @@
+import re
 from typing import Callable, Awaitable
 
 from chat.ChatMessage import ChatMessage
@@ -15,7 +16,16 @@ class Luna:
         self._respond = respond_callback
         self._brain = luna_brain
 
-    async def respond(self):
+    async def generate_and_execute_response_commands(self):
         response = self._brain.generate_chat_response(self._chat_context)
         print("Luna: " + response)
-        await self._respond(response)
+
+        command_parts = re.split(r"(/\w+)", response)
+
+        prev_part = None
+        for part in command_parts:
+            if prev_part == "/respond":
+                await self._respond(part)
+            prev_part = part
+
+        # await self._respond(response)

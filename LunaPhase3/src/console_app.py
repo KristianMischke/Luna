@@ -37,7 +37,7 @@ async def main():
         chat_context.append(ChatMessage(role="user", content=user_prompt))
 
         luna = Luna(chat_context, luna_response, open_ai_chat_gpt)
-        await luna.respond()
+        await luna.generate_and_execute_response_commands()
 
 
 if __name__ == '__main__':
