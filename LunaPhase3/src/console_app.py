@@ -9,6 +9,7 @@ from chat.OpenAiChatGPT import OpenAiChatGPT
 from chat.ChatMessage import ChatMessage
 from LunaBrain import LunaBrain
 from LunaBrainState import LunaBrainState
+from src.plugins.TenorGif import TenorGif
 
 load_dotenv()
 
@@ -19,10 +20,19 @@ luna_brain = LunaBrain(open_ai_api_key, usage_tracker_dict, LunaBrainState())
 
 chat_context = []
 
+tenor_api_key = os.getenv("TENOR_API_KEY")
+tenor_gif = TenorGif(tenor_api_key, "Luna", 8)
 
-async def luna_respond(message: str):
+
+async def respond(message: str):
     print(message)
     chat_context.append(ChatMessage(role="assistant", content="/respond " + message))
+
+
+async def gif(query: str):
+    gif_link = tenor_gif.find_gif(query)
+    print(gif_link)
+    chat_context.append(ChatMessage(role="assistant", content="/respond " + query))
 
 
 async def main():
@@ -38,7 +48,11 @@ async def main():
 
         chat_context.append(ChatMessage(role="user", content=user_prompt))
 
-        luna = Luna(chat_context, luna_respond, luna_brain)
+        callbacks = {
+            "respond": respond,
+            "gif": gif
+        }
+        luna = Luna(chat_context, callbacks, luna_brain)
         await luna.generate_and_execute_response_commands()
 
 

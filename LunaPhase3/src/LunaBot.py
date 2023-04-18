@@ -5,10 +5,10 @@ import discord
 from discord import Intents
 
 from Luna import Luna
-from chat.ChatResponseGenerator import ChatResponseGenerator
 from chat.ChatMessage import ChatMessage
 from LunaBrain import LunaBrain
 from LunaBrainState import Intelligence
+from src.plugins.TenorGif import TenorGif
 
 
 async def get_context_messages(message: discord.Message, max_context: int) -> list[discord.Message]:
@@ -25,11 +25,14 @@ class LunaDiscordBot(discord.Client):
                  intents: Intents,
                  discord_luna_admin_ids: list[int],
                  luna_brain: LunaBrain,
+                 tenor_gif: TenorGif,
                  **options: Any):
         super().__init__(intents=intents, **options)
 
         self.luna_brain = luna_brain
         self.discord_luna_admin_ids = discord_luna_admin_ids
+
+        self.tenor_gif = tenor_gif
 
     async def on_ready(self):
         print(f'Logged on as {self.user}!')
@@ -70,10 +73,18 @@ class LunaDiscordBot(discord.Client):
         context_messages = await get_context_messages(message, 15)
         chat_context = self._convert_to_chat_messages(context_messages)
 
-        async def luna_response(response: str):
+        async def respond(response: str):
             await channel.send(content=response)
 
-        luna = Luna(chat_context, luna_response, self.luna_brain)
+        async def gif(query: str):
+            gif_link = self.tenor_gif.find_gif(query)
+            await channel.send(content=gif_link)
+
+        callbacks = {
+            "respond": respond,
+            "gif": gif
+        }
+        luna = Luna(chat_context, callbacks, self.luna_brain)
 
         async with channel.typing():
             await luna.generate_and_execute_response_commands()
