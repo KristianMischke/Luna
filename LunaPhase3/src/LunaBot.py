@@ -8,7 +8,7 @@ from Luna import Luna
 from chat.ChatMessage import ChatMessage
 from LunaBrain import LunaBrain
 from LunaBrainState import Intelligence
-from src.plugins.TenorGif import TenorGif
+from plugins.TenorGif import TenorGif
 
 
 async def get_context_messages(message: discord.Message, max_context: int) -> list[discord.Message]:

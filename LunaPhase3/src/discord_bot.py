@@ -7,7 +7,7 @@ from LunaBot import LunaDiscordBot
 from UsageTrackerDict import UsageTrackerDict
 from LunaBrain import LunaBrain
 from LunaBrainState import LunaBrainState
-from src.plugins.TenorGif import TenorGif
+from plugins.TenorGif import TenorGif
 
 load_dotenv()
 
